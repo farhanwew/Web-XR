@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
     <title>AR Object Placement</title>
     <style>
         body {
@@ -21,12 +21,16 @@
         
         #ui {
             position: absolute;
-            top: 20px;
-            left: 20px;
-            right: 20px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             z-index: 1000;
             color: white;
             text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
         }
         
         #startButton {
@@ -39,39 +43,46 @@
             cursor: pointer;
             margin: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
         }
         
         #startButton:hover {
             background: #0056b3;
+            transform: translateY(-2px);
         }
         
         #startButton:disabled {
             background: #6c757d;
             cursor: not-allowed;
+            transform: none;
         }
         
         #status {
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            border-radius: 8px;
-            margin: 10px 0;
-            font-size: 14px;
+            margin: 15px 0;
+            font-size: 16px;
+            line-height: 1.4;
         }
         
         #instructions {
-            background: rgba(0,123,255,0.8);
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,123,255,0.9);
+            color: white;
             padding: 15px;
             border-radius: 8px;
-            margin: 10px 0;
             font-size: 16px;
+            text-align: center;
+            z-index: 1000;
             display: none;
         }
         
         #controls {
-            position: absolute;
+            position: fixed;
             bottom: 20px;
-            left: 20px;
-            right: 20px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 1000;
             display: none;
         }
@@ -84,7 +95,7 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            margin: 5px;
+            margin: 0 5px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
         
@@ -92,43 +103,23 @@
             background: rgba(255,255,255,1);
         }
         
-        #crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 20px;
-            height: 20px;
-            z-index: 999;
-            display: none;
-        }
-        
-        #crosshair::before,
-        #crosshair::after {
-            content: '';
-            position: absolute;
-            background: #fff;
-            box-shadow: 0 0 4px rgba(0,0,0,0.5);
-        }
-        
-        #crosshair::before {
-            top: 50%;
-            left: 2px;
-            right: 2px;
-            height: 2px;
-            transform: translateY(-50%);
-        }
-        
-        #crosshair::after {
-            left: 50%;
-            top: 2px;
-            bottom: 2px;
-            width: 2px;
-            transform: translateX(-50%);
-        }
-        
         canvas {
             display: block;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -136,14 +127,16 @@
     <div id="container">
         <div id="ui">
             <h1>AR Object Placement</h1>
-            <div id="status">Memeriksa dukungan WebXR...</div>
-            <button id="startButton" disabled>Mulai AR</button>
-            <div id="instructions">
-                Arahkan kamera ke permukaan datar, lalu ketuk untuk menempatkan objek
+            <div id="status">
+                <span class="loading"></span>
+                Memeriksa dukungan WebXR...
             </div>
+            <button id="startButton" disabled>Memuat...</button>
         </div>
         
-        <div id="crosshair"></div>
+        <div id="instructions">
+            Arahkan kamera ke permukaan datar, lalu ketuk layar untuk menempatkan objek
+        </div>
         
         <div id="controls">
             <button class="control-button" id="resetButton">Reset Objek</button>
@@ -152,738 +145,103 @@
     </div>
 
     <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
+    <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
     <!-- GLTFLoader -->
-    <script>
-        // GLTFLoader untuk Three.js r128
-        (function() {
-            'use strict';
-            
-            class GLTFLoader {
-                constructor(manager) {
-                    this.manager = manager !== undefined ? manager : THREE.DefaultLoadingManager;
-                    this.dracoLoader = null;
-                    this.ktx2Loader = null;
-                    this.meshoptDecoder = null;
-                    this.pluginCallbacks = [];
-                    this.register(function(parser) {
-                        return new GLTFMaterialsClearcoatExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFTextureBasisUExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFTextureWebPExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsTransmissionExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsVolumeExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsIorExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsEmissiveStrengthExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsSheenExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsIridescenceExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMaterialsSpecularExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFLightsExtension(parser);
-                    });
-                    this.register(function(parser) {
-                        return new GLTFMeshoptCompression(parser);
-                    });
-                }
-                
-                load(url, onLoad, onProgress, onError) {
-                    const scope = this;
-                    let resourcePath;
-                    
-                    if (this.resourcePath !== '') {
-                        resourcePath = this.resourcePath;
-                    } else if (this.path !== '') {
-                        resourcePath = this.path;
-                    } else {
-                        resourcePath = THREE.LoaderUtils.extractUrlBase(url);
-                    }
-                    
-                    this.manager.itemStart(url);
-                    
-                    const _onError = function(e) {
-                        if (onError) {
-                            onError(e);
-                        } else {
-                            console.error(e);
-                        }
-                        scope.manager.itemError(url);
-                        scope.manager.itemEnd(url);
-                    };
-                    
-                    const loader = new THREE.FileLoader(this.manager);
-                    loader.setPath(this.path);
-                    loader.setResponseType('arraybuffer');
-                    loader.setRequestHeader(this.requestHeader);
-                    loader.setWithCredentials(this.withCredentials);
-                    
-                    loader.load(url, function(data) {
-                        try {
-                            scope.parse(data, resourcePath, function(gltf) {
-                                onLoad(gltf);
-                                scope.manager.itemEnd(url);
-                            }, _onError);
-                        } catch (e) {
-                            _onError(e);
-                        }
-                    }, onProgress, _onError);
-                }
-                
-                setDRACOLoader(dracoLoader) {
-                    this.dracoLoader = dracoLoader;
-                    return this;
-                }
-                
-                setKTX2Loader(ktx2Loader) {
-                    this.ktx2Loader = ktx2Loader;
-                    return this;
-                }
-                
-                setMeshoptDecoder(meshoptDecoder) {
-                    this.meshoptDecoder = meshoptDecoder;
-                    return this;
-                }
-                
-                register(callback) {
-                    if (this.pluginCallbacks.indexOf(callback) === -1) {
-                        this.pluginCallbacks.push(callback);
-                    }
-                    return this;
-                }
-                
-                unregister(callback) {
-                    if (this.pluginCallbacks.indexOf(callback) !== -1) {
-                        this.pluginCallbacks.splice(this.pluginCallbacks.indexOf(callback), 1);
-                    }
-                    return this;
-                }
-                
-                parse(data, path, onLoad, onError) {
-                    let content;
-                    const extensions = {};
-                    
-                    if (typeof data === 'string') {
-                        content = data;
-                    } else {
-                        const magic = THREE.LoaderUtils.decodeText(new Uint8Array(data, 0, 4));
-                        
-                        if (magic === 'glTF') {
-                            extensions[EXTENSIONS.KHR_BINARY_GLTF] = new GLTFBinaryExtension(data);
-                            content = extensions[EXTENSIONS.KHR_BINARY_GLTF].content;
-                        } else {
-                            content = THREE.LoaderUtils.decodeText(new Uint8Array(data));
-                        }
-                    }
-                    
-                    const json = JSON.parse(content);
-                    
-                    if (json.asset === undefined || json.asset.version[0] < 2) {
-                        if (onError) onError(new Error('THREE.GLTFLoader: Unsupported asset. glTF versions >=2.0 are supported.'));
-                        return;
-                    }
-                    
-                    const parser = new GLTFParser(json, {
-                        path: path || this.resourcePath || '',
-                        crossOrigin: this.crossOrigin,
-                        requestHeader: this.requestHeader,
-                        manager: this.manager,
-                        ktx2Loader: this.ktx2Loader,
-                        meshoptDecoder: this.meshoptDecoder
-                    });
-                    
-                    parser.fileLoader.setRequestHeader(this.requestHeader);
-                    
-                    for (let i = 0; i < this.pluginCallbacks.length; i++) {
-                        const plugin = this.pluginCallbacks[i](parser);
-                        extensions[plugin.name] = plugin;
-                        parser.plugins[plugin.name] = plugin;
-                    }
-                    
-                    if (json.extensionsUsed) {
-                        for (let i = 0; i < json.extensionsUsed.length; ++i) {
-                            const extensionName = json.extensionsUsed[i];
-                            const extensionsRequired = json.extensionsRequired || [];
-                            
-                            switch (extensionName) {
-                                case EXTENSIONS.KHR_MATERIALS_UNLIT:
-                                    extensions[extensionName] = new GLTFMaterialsUnlitExtension();
-                                    break;
-                                case EXTENSIONS.KHR_DRACO_MESH_COMPRESSION:
-                                    extensions[extensionName] = new GLTFDracoMeshCompressionExtension(json, this.dracoLoader);
-                                    break;
-                                case EXTENSIONS.KHR_TEXTURE_TRANSFORM:
-                                    extensions[extensionName] = new GLTFTextureTransformExtension();
-                                    break;
-                                case EXTENSIONS.KHR_MESH_QUANTIZATION:
-                                    extensions[extensionName] = new GLTFMeshQuantizationExtension();
-                                    break;
-                                default:
-                                    if (extensionsRequired.indexOf(extensionName) >= 0 && extensions[extensionName] === undefined) {
-                                        console.warn('THREE.GLTFLoader: Unknown extension "' + extensionName + '".');
-                                    }
-                            }
-                        }
-                    }
-                    
-                    parser.setExtensions(extensions);
-                    parser.setPlugins(extensions);
-                    parser.parse(onLoad, onError);
-                }
-                
-                parseAsync(data, path) {
-                    const scope = this;
-                    return new Promise(function(resolve, reject) {
-                        scope.parse(data, path, resolve, reject);
-                    });
-                }
-            }
-            
-            // Simplified GLTF parser and extension classes
-            const EXTENSIONS = {
-                KHR_BINARY_GLTF: 'KHR_binary_glTF',
-                KHR_DRACO_MESH_COMPRESSION: 'KHR_draco_mesh_compression',
-                KHR_LIGHTS_PUNCTUAL: 'KHR_lights_punctual',
-                KHR_MATERIALS_CLEARCOAT: 'KHR_materials_clearcoat',
-                KHR_MATERIALS_IOR: 'KHR_materials_ior',
-                KHR_MATERIALS_SHEEN: 'KHR_materials_sheen',
-                KHR_MATERIALS_SPECULAR: 'KHR_materials_specular',
-                KHR_MATERIALS_TRANSMISSION: 'KHR_materials_transmission',
-                KHR_MATERIALS_IRIDESCENCE: 'KHR_materials_iridescence',
-                KHR_MATERIALS_UNLIT: 'KHR_materials_unlit',
-                KHR_MATERIALS_VOLUME: 'KHR_materials_volume',
-                KHR_TEXTURE_BASISU: 'KHR_texture_basisu',
-                KHR_TEXTURE_TRANSFORM: 'KHR_texture_transform',
-                KHR_MESH_QUANTIZATION: 'KHR_mesh_quantization',
-                KHR_MATERIALS_EMISSIVE_STRENGTH: 'KHR_materials_emissive_strength',
-                EXT_TEXTURE_WEBP: 'EXT_texture_webp',
-                EXT_MESHOPT_COMPRESSION: 'EXT_meshopt_compression'
-            };
-            
-            class GLTFParser {
-                constructor(json, options) {
-                    this.json = json || {};
-                    this.options = options || {};
-                    this.plugins = {};
-                    this.extensions = {};
-                    this.primitiveCache = {};
-                    this.textureLoader = new THREE.TextureLoader(this.options.manager);
-                    this.textureLoader.setCrossOrigin(this.options.crossOrigin);
-                    this.textureLoader.setRequestHeader(this.options.requestHeader);
-                    this.fileLoader = new THREE.FileLoader(this.options.manager);
-                    this.fileLoader.setResponseType('arraybuffer');
-                    
-                    if (this.options.crossOrigin === 'use-credentials') {
-                        this.fileLoader.setWithCredentials(true);
-                    }
-                }
-                
-                setExtensions(extensions) {
-                    this.extensions = extensions;
-                }
-                
-                setPlugins(plugins) {
-                    this.plugins = plugins;
-                }
-                
-                parse(onLoad, onError) {
-                    const scope = this;
-                    const json = this.json;
-                    const extensions = this.extensions;
-                    
-                    Promise.all([
-                        this.getDependencies('scene'),
-                        this.getDependencies('animation'),
-                        this.getDependencies('camera'),
-                    ]).then(function(dependencies) {
-                        const result = {
-                            scene: dependencies[0][json.scene || 0],
-                            scenes: dependencies[0],
-                            animations: dependencies[1],
-                            cameras: dependencies[2],
-                            asset: json.asset,
-                            parser: scope,
-                            userData: {}
-                        };
-                        
-                        onLoad(result);
-                    }).catch(onError);
-                }
-                
-                getDependencies(type) {
-                    const dependencies = this.cache.get(type);
-                    
-                    if (!dependencies) {
-                        const parser = this;
-                        const defs = this.json[type + (type === 'mesh' ? 'es' : 's')] || [];
-                        
-                        const pending = Promise.all(defs.map(function(def, index) {
-                            return parser.getDependency(type, index);
-                        }));
-                        
-                        this.cache.add(type, pending);
-                        
-                        return pending;
-                    }
-                    
-                    return dependencies;
-                }
-                
-                getDependency(type, index) {
-                    const cacheKey = type + ':' + index;
-                    let dependency = this.cache.get(cacheKey);
-                    
-                    if (!dependency) {
-                        switch (type) {
-                            case 'scene':
-                                dependency = this.loadScene(index);
-                                break;
-                            case 'node':
-                                dependency = this.loadNode(index);
-                                break;
-                            case 'mesh':
-                                dependency = this.loadMesh(index);
-                                break;
-                            case 'accessor':
-                                dependency = this.loadAccessor(index);
-                                break;
-                            case 'bufferView':
-                                dependency = this.loadBufferView(index);
-                                break;
-                            case 'buffer':
-                                dependency = this.loadBuffer(index);
-                                break;
-                            case 'material':
-                                dependency = this.loadMaterial(index);
-                                break;
-                            case 'texture':
-                                dependency = this.loadTexture(index);
-                                break;
-                            case 'skin':
-                                dependency = this.loadSkin(index);
-                                break;
-                            case 'animation':
-                                dependency = this.loadAnimation(index);
-                                break;
-                            case 'camera':
-                                dependency = this.loadCamera(index);
-                                break;
-                            default:
-                                throw new Error('Unknown type: ' + type);
-                        }
-                        
-                        this.cache.add(cacheKey, dependency);
-                    }
-                    
-                    return dependency;
-                }
-                
-                loadScene(sceneIndex) {
-                    const json = this.json;
-                    const extensions = this.extensions;
-                    const sceneDef = json.scenes[sceneIndex];
-                    const scope = this;
-                    const scene = new THREE.Group();
-                    
-                    if (sceneDef.name) scene.name = sceneDef.name;
-                    
-                    if (sceneDef.extras) scene.userData = sceneDef.extras;
-                    
-                    const nodeIds = sceneDef.nodes || [];
-                    
-                    return Promise.all(nodeIds.map(function(nodeId) {
-                        return scope.getDependency('node', nodeId);
-                    })).then(function(nodes) {
-                        for (let i = 0, il = nodes.length; i < il; i++) {
-                            scene.add(nodes[i]);
-                        }
-                        
-                        return scene;
-                    });
-                }
-                
-                // Simplified implementation - in a real application you'd need full GLTF parsing
-                loadNode(nodeIndex) {
-                    return Promise.resolve(new THREE.Object3D());
-                }
-                
-                loadMesh(meshIndex) {
-                    const geometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-                    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-                    return Promise.resolve(new THREE.Mesh(geometry, material));
-                }
-                
-                loadBuffer(bufferIndex) {
-                    return Promise.resolve(new ArrayBuffer());
-                }
-                
-                loadBufferView(bufferViewIndex) {
-                    return Promise.resolve(new ArrayBuffer());
-                }
-                
-                loadAccessor(accessorIndex) {
-                    return Promise.resolve(new THREE.BufferAttribute(new Float32Array(), 3));
-                }
-                
-                loadTexture(textureIndex) {
-                    return Promise.resolve(new THREE.Texture());
-                }
-                
-                loadMaterial(materialIndex) {
-                    return Promise.resolve(new THREE.MeshBasicMaterial());
-                }
-                
-                loadSkin(skinIndex) {
-                    return Promise.resolve({});
-                }
-                
-                loadAnimation(animationIndex) {
-                    return Promise.resolve(new THREE.AnimationClip());
-                }
-                
-                loadCamera(cameraIndex) {
-                    return Promise.resolve(new THREE.PerspectiveCamera());
-                }
-            }
-            
-            // Cache implementation
-            GLTFParser.prototype.cache = new (function() {
-                const cache = {};
-                
-                return {
-                    get: function(key) {
-                        return cache[key];
-                    },
-                    add: function(key, object) {
-                        cache[key] = object;
-                    },
-                    remove: function(key) {
-                        delete cache[key];
-                    },
-                    removeAll: function() {
-                        for (const key in cache) {
-                            delete cache[key];
-                        }
-                    }
-                };
-            })();
-            
-            // Basic extension stubs
-            class GLTFBinaryExtension {
-                constructor(data) {
-                    this.name = EXTENSIONS.KHR_BINARY_GLTF;
-                    this.content = null;
-                    this.body = null;
-                    
-                    const headerView = new DataView(data, 0, 12);
-                    this.header = {
-                        magic: THREE.LoaderUtils.decodeText(new Uint8Array(data.slice(0, 4))),
-                        version: headerView.getUint32(4, true),
-                        length: headerView.getUint32(8, true)
-                    };
-                    
-                    if (this.header.magic !== 'glTF') {
-                        throw new Error('THREE.GLTFLoader: Unsupported glTF-Binary header.');
-                    } else if (this.header.version < 2.0) {
-                        throw new Error('THREE.GLTFLoader: Legacy binary file detected.');
-                    }
-                    
-                    const chunkView = new DataView(data, 12);
-                    let chunkIndex = 0;
-                    
-                    while (chunkIndex < chunkView.byteLength) {
-                        const chunkLength = chunkView.getUint32(chunkIndex, true);
-                        chunkIndex += 4;
-                        
-                        const chunkType = chunkView.getUint32(chunkIndex, true);
-                        chunkIndex += 4;
-                        
-                        if (chunkType === 0x4E4F534A) {
-                            const contentArray = new Uint8Array(data, 12 + chunkIndex, chunkLength);
-                            this.content = THREE.LoaderUtils.decodeText(contentArray);
-                        } else if (chunkType === 0x004E4942) {
-                            const byteOffset = 12 + chunkIndex;
-                            this.body = data.slice(byteOffset, byteOffset + chunkLength);
-                        }
-                        
-                        chunkIndex += chunkLength;
-                    }
-                    
-                    if (this.content === null) {
-                        throw new Error('THREE.GLTFLoader: JSON content not found.');
-                    }
-                }
-            }
-            
-            // Basic extension stubs
-            class GLTFMaterialsClearcoatExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_CLEARCOAT;
-                }
-            }
-            
-            class GLTFTextureBasisUExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_TEXTURE_BASISU;
-                }
-            }
-            
-            class GLTFTextureWebPExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.EXT_TEXTURE_WEBP;
-                }
-            }
-            
-            class GLTFMaterialsTransmissionExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_TRANSMISSION;
-                }
-            }
-            
-            class GLTFMaterialsVolumeExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_VOLUME;
-                }
-            }
-            
-            class GLTFMaterialsIorExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_IOR;
-                }
-            }
-            
-            class GLTFMaterialsEmissiveStrengthExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_EMISSIVE_STRENGTH;
-                }
-            }
-            
-            class GLTFMaterialsSheenExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_SHEEN;
-                }
-            }
-            
-            class GLTFMaterialsIridescenceExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_IRIDESCENCE;
-                }
-            }
-            
-            class GLTFMaterialsSpecularExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_MATERIALS_SPECULAR;
-                }
-            }
-            
-            class GLTFLightsExtension {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.KHR_LIGHTS_PUNCTUAL;
-                }
-            }
-            
-            class GLTFMeshoptCompression {
-                constructor(parser) {
-                    this.parser = parser;
-                    this.name = EXTENSIONS.EXT_MESHOPT_COMPRESSION;
-                }
-            }
-            
-            class GLTFMaterialsUnlitExtension {
-                constructor() {
-                    this.name = EXTENSIONS.KHR_MATERIALS_UNLIT;
-                }
-            }
-            
-            class GLTFDracoMeshCompressionExtension {
-                constructor(json, dracoLoader) {
-                    this.name = EXTENSIONS.KHR_DRACO_MESH_COMPRESSION;
-                    this.json = json;
-                    this.dracoLoader = dracoLoader;
-                }
-            }
-            
-            class GLTFTextureTransformExtension {
-                constructor() {
-                    this.name = EXTENSIONS.KHR_TEXTURE_TRANSFORM;
-                }
-            }
-            
-            class GLTFMeshQuantizationExtension {
-                constructor() {
-                    this.name = EXTENSIONS.KHR_MESH_QUANTIZATION;
-                }
-            }
-            
-            // Export to global scope
-            THREE.GLTFLoader = GLTFLoader;
-        })();
-    </script>
+    <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
-        // Aplikasi AR Object Placement
+        // AR Object Placement berdasarkan tutorial resmi Google ARCore WebXR
         class ARObjectPlacement {
             constructor() {
+                this.canvas = null;
+                this.gl = null;
                 this.scene = null;
                 this.camera = null;
                 this.renderer = null;
-                this.xrSession = null;
+                this.session = null;
+                this.referenceSpace = null;
+                this.viewerSpace = null;
                 this.hitTestSource = null;
-                this.hitTestSourceRequested = false;
-                this.placedObjects = [];
-                this.reticle = null;
-                this.controller = null;
                 
-                // Model yang akan ditempatkan
-                this.modelUrl = 'Astronaut.glb'
+                // Models
+                this.reticle = null;
+                this.arObject = null;
+                this.placedObjects = [];
                 
                 this.init();
             }
             
             async init() {
                 await this.checkWebXRSupport();
-                this.setupScene();
                 this.setupEventListeners();
-                this.createFallbackModel();
+                await this.loadModels();
             }
             
             async checkWebXRSupport() {
                 const statusEl = document.getElementById('status');
                 const startButton = document.getElementById('startButton');
                 
-                if ('xr' in navigator) {
-                    try {
-                        const supported = await navigator.xr.isSessionSupported('immersive-ar');
-                        if (supported) {
-                            statusEl.textContent = 'WebXR AR didukung! Siap untuk memulai.';
-                            startButton.disabled = false;
-                            startButton.textContent = 'Mulai AR';
-                        } else {
-                            statusEl.textContent = 'WebXR AR tidak didukung di perangkat ini.';
-                            startButton.textContent = 'AR Tidak Didukung';
-                        }
-                    } catch (error) {
-                        statusEl.textContent = 'Error memeriksa dukungan WebXR: ' + error.message;
-                        startButton.textContent = 'Error';
-                    }
-                } else {
-                    statusEl.textContent = 'WebXR tidak tersedia di browser ini.';
+                if (!navigator.xr) {
+                    statusEl.innerHTML = '❌ WebXR tidak tersedia di browser ini';
                     startButton.textContent = 'WebXR Tidak Tersedia';
+                    return;
+                }
+                
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+                    if (supported) {
+                        statusEl.innerHTML = '✅ WebXR AR didukung! Memuat model...';
+                        startButton.disabled = false;
+                    } else {
+                        statusEl.innerHTML = '❌ WebXR AR tidak didukung di perangkat ini';
+                        startButton.textContent = 'AR Tidak Didukung';
+                    }
+                } catch (error) {
+                    console.error('Error checking WebXR support:', error);
+                    statusEl.innerHTML = '❌ Error memeriksa dukungan WebXR';
+                    startButton.textContent = 'Error';
                 }
             }
             
-            setupScene() {
-                // Scene
-                this.scene = new THREE.Scene();
+            async loadModels() {
+                const statusEl = document.getElementById('status');
+                const startButton = document.getElementById('startButton');
                 
-                // Renderer
-                this.renderer = new THREE.WebGLRenderer({ 
-                    antialias: true, 
-                    alpha: true 
-                });
-                this.renderer.setSize(window.innerWidth, window.innerHeight);
-                this.renderer.xr.enabled = true;
-                document.body.appendChild(this.renderer.domElement);
-                
-                // Camera
-                this.camera = new THREE.PerspectiveCamera(
-                    75, 
-                    window.innerWidth / window.innerHeight, 
-                    0.01, 
-                    20
-                );
-                
-                // Lighting
-                const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-                light.position.set(0.5, 1, 0.25);
-                this.scene.add(light);
-                
-                // Directional light
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                directionalLight.position.set(1, 1, 1);
-                this.scene.add(directionalLight);
-                
-                // Reticle (crosshair di permukaan)
-                const reticleGeometry = new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2);
-                const reticleMaterial = new THREE.MeshBasicMaterial({ 
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 0.8
-                });
-                this.reticle = new THREE.Mesh(reticleGeometry, reticleMaterial);
-                this.reticle.matrixAutoUpdate = false;
-                this.reticle.visible = false;
-                this.scene.add(this.reticle);
-                
-                // Render loop
-                this.renderer.setAnimationLoop(() => this.render());
+                try {
+                    const loader = new THREE.GLTFLoader();
+                    
+                    // Load reticle
+                    const reticleGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf');
+                    this.reticle = reticleGltf.scene;
+                    this.reticle.visible = false;
+                    
+                    // Try to load user model, fallback to sunflower
+                    try {
+                        const userGltf = await this.loadGLTF(loader, 'Astronaut.glb');
+                        this.arObject = userGltf.scene;
+                        this.arObject.scale.setScalar(0.3);
+                        statusEl.innerHTML = '✅ Model Astronaut siap!';
+                    } catch (error) {
+                        console.warn('User model not found, using fallback:', error);
+                        const fallbackGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf');
+                        this.arObject = fallbackGltf.scene;
+                        statusEl.innerHTML = '✅ Model default siap!';
+                    }
+                    
+                    startButton.textContent = 'Mulai AR';
+                    startButton.disabled = false;
+                    
+                } catch (error) {
+                    console.error('Error loading models:', error);
+                    statusEl.innerHTML = '❌ Gagal memuat model';
+                    startButton.textContent = 'Error Model';
+                }
             }
             
-            createFallbackModel() {
-                // Membuat model chair sederhana sebagai fallback
-                const group = new THREE.Group();
-                
-                // Seat
-                const seatGeometry = new THREE.BoxGeometry(0.4, 0.05, 0.4);
-                const seatMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-                const seat = new THREE.Mesh(seatGeometry, seatMaterial);
-                seat.position.y = 0.4;
-                group.add(seat);
-                
-                // Backrest
-                const backGeometry = new THREE.BoxGeometry(0.4, 0.5, 0.05);
-                const backMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-                const back = new THREE.Mesh(backGeometry, backMaterial);
-                back.position.y = 0.65;
-                back.position.z = -0.175;
-                group.add(back);
-                
-                // Legs
-                const legGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.4);
-                const legMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
-                
-                const legPositions = [
-                    [-0.15, 0.2, -0.15],
-                    [0.15, 0.2, -0.15],
-                    [-0.15, 0.2, 0.15],
-                    [0.15, 0.2, 0.15]
-                ];
-                
-                legPositions.forEach(pos => {
-                    const leg = new THREE.Mesh(legGeometry, legMaterial);
-                    leg.position.set(...pos);
-                    group.add(leg);
+            loadGLTF(loader, url) {
+                return new Promise((resolve, reject) => {
+                    loader.load(url, resolve, undefined, reject);
                 });
-                
-                this.modelTemplate = group;
             }
             
             setupEventListeners() {
@@ -894,117 +252,204 @@
                 startButton.addEventListener('click', () => this.startAR());
                 resetButton.addEventListener('click', () => this.resetObjects());
                 exitButton.addEventListener('click', () => this.exitAR());
-                
-                // Handle window resize
-                window.addEventListener('resize', () => {
-                    this.camera.aspect = window.innerWidth / window.innerHeight;
-                    this.camera.updateProjectionMatrix();
-                    this.renderer.setSize(window.innerWidth, window.innerHeight);
-                });
             }
             
             async startAR() {
                 try {
-                    const sessionInit = {
-                        requiredFeatures: ['hit-test'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.getElementById('ui') }
-                    };
+                    // Setup canvas and WebGL context
+                    this.canvas = document.createElement("canvas");
+                    document.body.appendChild(this.canvas);
+                    this.gl = this.canvas.getContext("webgl", {xrCompatible: true});
                     
-                    this.xrSession = await navigator.xr.requestSession('immersive-ar', sessionInit);
+                    if (!this.gl) {
+                        throw new Error("WebGL not supported");
+                    }
                     
-                    await this.renderer.xr.setSession(this.xrSession);
+                    // Create scene
+                    this.scene = new THREE.Scene();
                     
-                    // Setup controller
-                    this.controller = this.renderer.xr.getController(0);
-                    this.controller.addEventListener('select', () => this.onSelect());
-                    this.scene.add(this.controller);
+                    // Add lighting
+                    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
+                    directionalLight.position.set(10, 15, 10);
+                    this.scene.add(directionalLight);
                     
-                    // Setup hit test
-                    const referenceSpace = await this.xrSession.requestReferenceSpace('viewer');
-                    this.hitTestSource = await this.xrSession.requestHitTestSource({ space: referenceSpace });
+                    // Add ambient light
+                    const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+                    this.scene.add(ambientLight);
+                    
+                    // Add reticle to scene
+                    this.scene.add(this.reticle);
+                    
+                    // Setup renderer
+                    this.renderer = new THREE.WebGLRenderer({
+                        alpha: true,
+                        preserveDrawingBuffer: true,
+                        canvas: this.canvas,
+                        context: this.gl
+                    });
+                    this.renderer.autoClear = false;
+                    
+                    // Setup camera
+                    this.camera = new THREE.PerspectiveCamera();
+                    this.camera.matrixAutoUpdate = false;
+                    
+                    // Request XR session
+                    this.session = await navigator.xr.requestSession("immersive-ar", {
+                        requiredFeatures: ['hit-test']
+                    });
+                    
+                    // Setup session
+                    this.session.updateRenderState({
+                        baseLayer: new XRWebGLLayer(this.session, this.gl)
+                    });
+                    
+                    // Setup reference spaces
+                    this.referenceSpace = await this.session.requestReferenceSpace('local');
+                    this.viewerSpace = await this.session.requestReferenceSpace('viewer');
+                    
+                    // Setup hit test source
+                    this.hitTestSource = await this.session.requestHitTestSource({ 
+                        space: this.viewerSpace 
+                    });
+                    
+                    // Add event listeners
+                    this.session.addEventListener('end', () => this.onSessionEnded());
+                    this.session.addEventListener('select', () => this.onSelect());
+                    
+                    // Start render loop
+                    this.session.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
                     
                     // Update UI
                     document.getElementById('ui').style.display = 'none';
                     document.getElementById('instructions').style.display = 'block';
                     document.getElementById('controls').style.display = 'block';
-                    document.getElementById('crosshair').style.display = 'block';
                     
-                    console.log('AR session dimulai');
+                    console.log('AR session started successfully');
                     
                 } catch (error) {
-                    console.error('Error memulai AR:', error);
+                    console.error('Error starting AR:', error);
                     alert('Gagal memulai AR: ' + error.message);
+                    this.cleanup();
+                }
+            }
+            
+            onXRFrame(time, frame) {
+                // Queue next frame
+                this.session.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
+                
+                // Bind framebuffer
+                this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.session.renderState.baseLayer.framebuffer);
+                
+                // Get viewer pose
+                const pose = frame.getViewerPose(this.referenceSpace);
+                
+                if (pose) {
+                    // Clear the scene
+                    this.renderer.clear();
+                    
+                    // Handle hit test
+                    this.handleHitTest(frame);
+                    
+                    // Render each view (typically just one for mobile AR)
+                    for (const view of pose.views) {
+                        const viewport = this.session.renderState.baseLayer.getViewport(view);
+                        this.renderer.setSize(viewport.width, viewport.height);
+                        
+                        // Update camera
+                        this.camera.matrix.fromArray(view.transform.matrix);
+                        this.camera.projectionMatrix.fromArray(view.projectionMatrix);
+                        this.camera.updateMatrixWorld(true);
+                        
+                        // Render
+                        this.renderer.render(this.scene, this.camera);
+                    }
+                }
+            }
+            
+            handleHitTest(frame) {
+                if (!this.hitTestSource || !this.reticle) return;
+                
+                const hitTestResults = frame.getHitTestResults(this.hitTestSource);
+                
+                if (hitTestResults.length > 0) {
+                    const hitPose = hitTestResults[0].getPose(this.referenceSpace);
+                    
+                    this.reticle.visible = true;
+                    this.reticle.position.set(
+                        hitPose.transform.position.x,
+                        hitPose.transform.position.y,
+                        hitPose.transform.position.z
+                    );
+                    this.reticle.updateMatrixWorld(true);
+                } else {
+                    this.reticle.visible = false;
                 }
             }
             
             onSelect() {
-                if (this.reticle.visible) {
-                    // Clone model template
-                    const object = this.modelTemplate.clone();
-                    
-                    // Set posisi dari reticle
-                    object.position.setFromMatrixPosition(this.reticle.matrix);
-                    object.quaternion.setFromRotationMatrix(this.reticle.matrix);
-                    
-                    // Tambahkan sedikit offset agar tidak menempel di permukaan
-                    object.position.y += 0.02;
-                    
-                    // Tambahkan ke scene dan array
-                    this.scene.add(object);
-                    this.placedObjects.push(object);
-                    
-                    console.log('Objek ditempatkan:', this.placedObjects.length);
-                }
+                if (!this.reticle.visible || !this.arObject) return;
+                
+                // Clone the AR object
+                const clone = this.arObject.clone();
+                clone.position.copy(this.reticle.position);
+                
+                // Add some randomness to rotation
+                clone.rotation.y = Math.random() * Math.PI * 2;
+                
+                // Add to scene and tracking array
+                this.scene.add(clone);
+                this.placedObjects.push(clone);
+                
+                console.log('Object placed. Total objects:', this.placedObjects.length);
             }
             
             resetObjects() {
-                // Hapus semua objek yang ditempatkan
+                // Remove all placed objects
                 this.placedObjects.forEach(object => {
                     this.scene.remove(object);
                 });
                 this.placedObjects = [];
-                console.log('Semua objek dihapus');
+                console.log('All objects removed');
             }
             
             async exitAR() {
-                if (this.xrSession) {
-                    await this.xrSession.end();
-                    this.xrSession = null;
-                    
-                    // Reset UI
-                    document.getElementById('ui').style.display = 'block';
-                    document.getElementById('instructions').style.display = 'none';
-                    document.getElementById('controls').style.display = 'none';
-                    document.getElementById('crosshair').style.display = 'none';
-                    
-                    console.log('AR session berakhir');
+                if (this.session) {
+                    await this.session.end();
                 }
             }
             
-            render() {
-                if (this.xrSession) {
-                    const frame = this.renderer.xr.getFrame();
-                    
-                    if (this.hitTestSource && frame) {
-                        const referenceSpace = this.renderer.xr.getReferenceSpace();
-                        const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-                        
-                        if (hitTestResults.length > 0) {
-                            const hit = hitTestResults[0];
-                            this.reticle.visible = true;
-                            this.reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                        } else {
-                            this.reticle.visible = false;
-                        }
-                    }
+            onSessionEnded() {
+                this.cleanup();
+                
+                // Reset UI
+                document.getElementById('ui').style.display = 'block';
+                document.getElementById('instructions').style.display = 'none';
+                document.getElementById('controls').style.display = 'none';
+                
+                console.log('AR session ended');
+            }
+            
+            cleanup() {
+                // Clean up resources
+                if (this.hitTestSource) {
+                    this.hitTestSource.cancel();
+                    this.hitTestSource = null;
                 }
                 
-                this.renderer.render(this.scene, this.camera);
+                if (this.canvas && this.canvas.parentNode) {
+                    this.canvas.parentNode.removeChild(this.canvas);
+                    this.canvas = null;
+                }
+                
+                this.session = null;
+                this.gl = null;
+                this.renderer = null;
+                this.referenceSpace = null;
+                this.viewerSpace = null;
             }
         }
         
-        // Inisialisasi aplikasi
+        // Initialize app when DOM is ready
         document.addEventListener('DOMContentLoaded', () => {
             new ARObjectPlacement();
         });
