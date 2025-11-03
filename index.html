@@ -90,6 +90,7 @@
             border-radius: 10px;
             flex-direction: column;
             align-items: center;
+            pointer-events: auto;
         }
 
         #controls-main {
@@ -241,6 +242,7 @@
                 this.placedObjects = [];
                 this.selectedObject = null;
                 this.objectIndex = 0;
+                this.isInteractingWithUI = false;
                 
                 this.init();
             }
@@ -339,12 +341,60 @@
                 const exitButton = document.getElementById('exitButton');
                 const scaleSlider = document.getElementById('scaleSlider');
                 const rotateSlider = document.getElementById('rotateSlider');
+                const controlsContainer = document.getElementById('controls');
                 
                 startButton.addEventListener('click', () => this.startAR());
-                resetButton.addEventListener('click', () => this.resetObjects());
-                exitButton.addEventListener('click', () => this.exitAR());
+                
+                controlsContainer.addEventListener('touchstart', (e) => {
+                    this.isInteractingWithUI = true;
+                    e.stopPropagation();
+                });
+                controlsContainer.addEventListener('touchend', () => {
+                    setTimeout(() => { this.isInteractingWithUI = false; }, 100);
+                });
+                
+                resetButton.addEventListener('touchstart', () => {
+                    this.isInteractingWithUI = true;
+                });
+                resetButton.addEventListener('click', () => {
+                    this.resetObjects();
+                    setTimeout(() => { this.isInteractingWithUI = false; }, 100);
+                });
+                
+                exitButton.addEventListener('touchstart', () => {
+                    this.isInteractingWithUI = true;
+                });
+                exitButton.addEventListener('click', () => {
+                    this.exitAR();
+                    setTimeout(() => { this.isInteractingWithUI = false; }, 100);
+                });
 
+                scaleSlider.addEventListener('touchstart', () => {
+                    this.isInteractingWithUI = true;
+                });
+                scaleSlider.addEventListener('touchend', () => {
+                    this.isInteractingWithUI = false;
+                });
+                scaleSlider.addEventListener('mousedown', () => {
+                    this.isInteractingWithUI = true;
+                });
+                scaleSlider.addEventListener('mouseup', () => {
+                    this.isInteractingWithUI = false;
+                });
                 scaleSlider.addEventListener('input', (event) => this.onScaleChange(event.target.value));
+
+                rotateSlider.addEventListener('touchstart', () => {
+                    this.isInteractingWithUI = true;
+                });
+                rotateSlider.addEventListener('touchend', () => {
+                    this.isInteractingWithUI = false;
+                });
+                rotateSlider.addEventListener('mousedown', () => {
+                    this.isInteractingWithUI = true;
+                });
+                rotateSlider.addEventListener('mouseup', () => {
+                    this.isInteractingWithUI = false;
+                });
                 rotateSlider.addEventListener('input', (event) => this.onRotateChange(event.target.value));
             }
             
@@ -478,6 +528,10 @@
             }
             
             onSelect(event) {
+                if (this.isInteractingWithUI) {
+                    return;
+                }
+                
                 if (this.reticle.visible && this.arObject) {
                     this.placeObject();
                 }
