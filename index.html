@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <title>AR Object Placement</title>
+    <title>AR Object Placement - FPV Mode</title>
     <style>
         body {
             margin: 0;
@@ -132,6 +132,15 @@
             background: rgba(220, 53, 69, 1);
         }
 
+        .control-button.fpv {
+            background: rgba(40, 167, 69, 0.9);
+            color: white;
+        }
+
+        .control-button.fpv:hover {
+            background: rgba(40, 167, 69, 1);
+        }
+
         .slider-container {
             display: flex;
             align-items: center;
@@ -191,6 +200,106 @@
             display: flex;
             justify-content: center;
             margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* FPV Controls */
+        #fpvControls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1001;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: auto;
+        }
+
+        #fpvInfo {
+            background: rgba(40, 167, 69, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        #movementControls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        #dpadContainer {
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(3, 60px);
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        .dpad-button {
+            background: rgba(255,255,255,0.9);
+            border: none;
+            border-radius: 8px;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .dpad-button:active {
+            background: rgba(200,200,200,0.9);
+        }
+
+        .dpad-button.empty {
+            background: transparent;
+            box-shadow: none;
+        }
+
+        #fpvExitButton {
+            padding: 12px 30px;
+            font-size: 16px;
+            background: rgba(220, 53, 69, 0.9);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        #fpvExitButton:hover {
+            background: rgba(220, 53, 69, 1);
+        }
+
+        #heightControls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .height-button {
+            padding: 10px 20px;
+            font-size: 14px;
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .height-button:active {
+            background: rgba(200,200,200,0.9);
         }
         
         canvas {
@@ -216,7 +325,7 @@
 <body>
     <div id="container">
         <div id="ui">
-            <h1>AR Object Placement</h1>
+            <h1>AR Object Placement - FPV Mode</h1>
             <div id="status">
                 <span class="loading"></span>
                 Memeriksa dukungan WebXR...
@@ -245,9 +354,36 @@
                     <input type="range" id="rotateSlider" min="0" max="360" value="0" step="5">
                 </div>
                 <div id="manipulation-buttons">
+                    <button class="control-button fpv" id="fpvButton">🚶 Mode FPV</button>
                     <button class="control-button delete" id="deleteButton">Hapus Objek</button>
                     <button class="control-button" id="deselectButton">Batal Pilih</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- FPV Controls -->
+        <div id="fpvControls">
+            <div id="fpvInfo">
+                Mode First-Person View 🏠<br>
+                <small>Jelajahi model dalam skala 1:1</small>
+            </div>
+            <div id="movementControls">
+                <div id="dpadContainer">
+                    <div class="dpad-button empty"></div>
+                    <div class="dpad-button" id="forwardButton">▲</div>
+                    <div class="dpad-button empty"></div>
+                    <div class="dpad-button" id="leftButton">◀</div>
+                    <div class="dpad-button empty"></div>
+                    <div class="dpad-button" id="rightButton">▶</div>
+                    <div class="dpad-button empty"></div>
+                    <div class="dpad-button" id="backwardButton">▼</div>
+                    <div class="dpad-button empty"></div>
+                </div>
+                <div id="heightControls">
+                    <button class="height-button" id="moveUpButton">Naik ⬆</button>
+                    <button class="height-button" id="moveDownButton">Turun ⬇</button>
+                </div>
+                <button id="fpvExitButton">Keluar Mode FPV</button>
             </div>
         </div>
     </div>
@@ -279,6 +415,27 @@
                 // For object selection
                 this.raycaster = new THREE.Raycaster();
                 this.highlightBox = null;
+
+                // FPV Mode
+                this.fpvMode = false;
+                this.fpvObject = null;
+                this.fpvCameraOffset = new THREE.Vector3(0, 1.6, 0); // Eye height ~1.6m
+                this.fpvMovementSpeed = 0.05; // meters per frame
+                this.fpvOriginalScale = new THREE.Vector3();
+                this.fpvOriginalPosition = new THREE.Vector3();
+                this.fpvTargetScale = 10; // Scale multiplier for 1:1 mode
+                this.fpvCameraPosition = new THREE.Vector3();
+                this.fpvCameraRotation = 0;
+
+                // Movement state
+                this.movementState = {
+                    forward: false,
+                    backward: false,
+                    left: false,
+                    right: false,
+                    up: false,
+                    down: false
+                };
                 
                 this.init();
             }
@@ -291,7 +448,6 @@
             }
 
             createSelectionHighlight() {
-                // Create a wireframe box for highlighting selected objects
                 const geometry = new THREE.BoxGeometry(1, 1, 1);
                 const edges = new THREE.EdgesGeometry(geometry);
                 const material = new THREE.LineBasicMaterial({ 
@@ -392,6 +548,7 @@
                 const exitButton = document.getElementById('exitButton');
                 const deleteButton = document.getElementById('deleteButton');
                 const deselectButton = document.getElementById('deselectButton');
+                const fpvButton = document.getElementById('fpvButton');
                 const scaleSlider = document.getElementById('scaleSlider');
                 const rotateSlider = document.getElementById('rotateSlider');
                 const controlsContainer = document.getElementById('controls');
@@ -434,42 +591,105 @@
                     this.lastUIInteraction = Date.now();
                 });
 
-                // Slider events
-                scaleSlider.addEventListener('touchstart', () => {
-                    this.isInteractingWithUI = true;
+                fpvButton.addEventListener('click', () => {
+                    this.enterFPVMode();
                     this.lastUIInteraction = Date.now();
                 });
-                scaleSlider.addEventListener('touchend', () => {
-                    this.lastUIInteraction = Date.now();
-                    setTimeout(() => { this.isInteractingWithUI = false; }, 500);
-                });
-                scaleSlider.addEventListener('mousedown', () => {
-                    this.isInteractingWithUI = true;
-                    this.lastUIInteraction = Date.now();
-                });
-                scaleSlider.addEventListener('mouseup', () => {
-                    this.lastUIInteraction = Date.now();
-                    setTimeout(() => { this.isInteractingWithUI = false; }, 500);
-                });
-                scaleSlider.addEventListener('input', (event) => this.onScaleChange(event.target.value));
 
-                rotateSlider.addEventListener('touchstart', () => {
+                // Slider events
+                this.setupSliderEvents(scaleSlider, 'scale');
+                this.setupSliderEvents(rotateSlider, 'rotate');
+
+                // FPV Controls
+                this.setupFPVControls();
+            }
+
+            setupSliderEvents(slider, type) {
+                slider.addEventListener('touchstart', () => {
                     this.isInteractingWithUI = true;
                     this.lastUIInteraction = Date.now();
                 });
-                rotateSlider.addEventListener('touchend', () => {
+                slider.addEventListener('touchend', () => {
                     this.lastUIInteraction = Date.now();
                     setTimeout(() => { this.isInteractingWithUI = false; }, 500);
                 });
-                rotateSlider.addEventListener('mousedown', () => {
+                slider.addEventListener('mousedown', () => {
                     this.isInteractingWithUI = true;
                     this.lastUIInteraction = Date.now();
                 });
-                rotateSlider.addEventListener('mouseup', () => {
+                slider.addEventListener('mouseup', () => {
                     this.lastUIInteraction = Date.now();
                     setTimeout(() => { this.isInteractingWithUI = false; }, 500);
                 });
-                rotateSlider.addEventListener('input', (event) => this.onRotateChange(event.target.value));
+                
+                if (type === 'scale') {
+                    slider.addEventListener('input', (e) => this.onScaleChange(e.target.value));
+                } else if (type === 'rotate') {
+                    slider.addEventListener('input', (e) => this.onRotateChange(e.target.value));
+                }
+            }
+
+            setupFPVControls() {
+                const fpvControlsContainer = document.getElementById('fpvControls');
+                const fpvExitButton = document.getElementById('fpvExitButton');
+                
+                // Prevent touch events from propagating
+                fpvControlsContainer.addEventListener('touchstart', (e) => {
+                    this.isInteractingWithUI = true;
+                    this.lastUIInteraction = Date.now();
+                    e.stopPropagation();
+                });
+                fpvControlsContainer.addEventListener('touchend', () => {
+                    this.lastUIInteraction = Date.now();
+                    setTimeout(() => { this.isInteractingWithUI = false; }, 500);
+                });
+
+                // Movement buttons
+                this.setupMovementButton('forwardButton', 'forward');
+                this.setupMovementButton('backwardButton', 'backward');
+                this.setupMovementButton('leftButton', 'left');
+                this.setupMovementButton('rightButton', 'right');
+                this.setupMovementButton('moveUpButton', 'up');
+                this.setupMovementButton('moveDownButton', 'down');
+
+                // Exit FPV
+                fpvExitButton.addEventListener('click', () => {
+                    this.exitFPVMode();
+                    this.lastUIInteraction = Date.now();
+                });
+            }
+
+            setupMovementButton(buttonId, direction) {
+                const button = document.getElementById(buttonId);
+                
+                button.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.movementState[direction] = true;
+                    this.lastUIInteraction = Date.now();
+                });
+                
+                button.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    this.movementState[direction] = false;
+                    this.lastUIInteraction = Date.now();
+                });
+
+                button.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.movementState[direction] = true;
+                    this.lastUIInteraction = Date.now();
+                });
+                
+                button.addEventListener('mouseup', (e) => {
+                    e.preventDefault();
+                    this.movementState[direction] = false;
+                    this.lastUIInteraction = Date.now();
+                });
+
+                // Also stop on mouse leave
+                button.addEventListener('mouseleave', () => {
+                    this.movementState[direction] = false;
+                });
             }
             
             async startAR() {
@@ -567,19 +787,94 @@
                 if (pose) {
                     this.renderer.clear();
                     
-                    this.handleHitTest(frame);
+                    if (!this.fpvMode) {
+                        this.handleHitTest(frame);
+                    } else {
+                        this.handleFPVMovement(frame);
+                    }
                     
                     for (const view of pose.views) {
                         const viewport = this.session.renderState.baseLayer.getViewport(view);
                         this.renderer.setSize(viewport.width, viewport.height);
                         
-                        this.camera.matrix.fromArray(view.transform.matrix);
-                        this.camera.projectionMatrix.fromArray(view.projectionMatrix);
-                        this.camera.updateMatrixWorld(true);
+                        if (!this.fpvMode) {
+                            // Normal AR mode - use XR camera
+                            this.camera.matrix.fromArray(view.transform.matrix);
+                            this.camera.projectionMatrix.fromArray(view.projectionMatrix);
+                            this.camera.updateMatrixWorld(true);
+                        } else {
+                            // FPV mode - use custom camera position
+                            this.updateFPVCamera(view);
+                        }
                         
                         this.renderer.render(this.scene, this.camera);
                     }
                 }
+            }
+
+            handleFPVMovement(frame) {
+                if (!this.fpvObject) return;
+
+                const moveSpeed = this.fpvMovementSpeed;
+                const movement = new THREE.Vector3();
+
+                // Get viewer orientation for look direction
+                const pose = frame.getViewerPose(this.referenceSpace);
+                if (pose) {
+                    const view = pose.views[0];
+                    const viewMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
+                    const forward = new THREE.Vector3(0, 0, -1);
+                    const right = new THREE.Vector3(1, 0, 0);
+                    
+                    forward.applyMatrix4(viewMatrix).normalize();
+                    right.applyMatrix4(viewMatrix).normalize();
+                    
+                    // Remove Y component for horizontal movement
+                    forward.y = 0;
+                    forward.normalize();
+                    right.y = 0;
+                    right.normalize();
+
+                    // Calculate movement based on button state
+                    if (this.movementState.forward) {
+                        movement.add(forward.multiplyScalar(moveSpeed));
+                    }
+                    if (this.movementState.backward) {
+                        movement.add(forward.multiplyScalar(-moveSpeed));
+                    }
+                    if (this.movementState.left) {
+                        movement.add(right.multiplyScalar(-moveSpeed));
+                    }
+                    if (this.movementState.right) {
+                        movement.add(right.multiplyScalar(moveSpeed));
+                    }
+                    if (this.movementState.up) {
+                        movement.y += moveSpeed;
+                    }
+                    if (this.movementState.down) {
+                        movement.y -= moveSpeed;
+                    }
+
+                    // Apply movement to FPV camera position
+                    this.fpvCameraPosition.add(movement);
+                }
+            }
+
+            updateFPVCamera(view) {
+                // Get the real camera position and orientation from XR
+                const viewMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
+                
+                // Extract rotation from view transform
+                const rotation = new THREE.Euler().setFromRotationMatrix(viewMatrix);
+                
+                // Apply custom position with XR rotation
+                const finalPosition = this.fpvCameraPosition.clone();
+                
+                // Update camera
+                this.camera.position.copy(finalPosition);
+                this.camera.rotation.copy(rotation);
+                this.camera.projectionMatrix.fromArray(view.projectionMatrix);
+                this.camera.updateMatrixWorld(true);
             }
             
             handleHitTest(frame) {
@@ -610,6 +905,11 @@
                     return;
                 }
 
+                if (this.fpvMode) {
+                    // In FPV mode, ignore select events
+                    return;
+                }
+
                 // Try to select an existing object first
                 const frame = event.frame;
                 const inputSource = event.inputSource;
@@ -618,7 +918,6 @@
                     const pose = frame.getPose(inputSource.targetRaySpace, this.referenceSpace);
                     
                     if (pose) {
-                        // Create ray from input source
                         const origin = new THREE.Vector3(
                             pose.transform.position.x,
                             pose.transform.position.y,
@@ -635,11 +934,9 @@
                         
                         this.raycaster.set(origin, direction);
                         
-                        // Check for intersections with placed objects
                         const intersects = this.raycaster.intersectObjects(this.placedObjects, true);
                         
                         if (intersects.length > 0) {
-                            // Find the parent object (not the mesh children)
                             let selectedObj = intersects[0].object;
                             while (selectedObj.parent && !this.placedObjects.includes(selectedObj)) {
                                 selectedObj = selectedObj.parent;
@@ -679,14 +976,11 @@
             selectObject(object) {
                 this.selectedObject = object;
                 
-                // Update highlight box
                 this.updateHighlightBox();
                 
-                // Show manipulation controls
                 const manipulationControls = document.getElementById('controls-manipulation');
                 manipulationControls.style.display = 'flex';
 
-                // Update UI
                 document.getElementById('selectedObjectId').textContent = '#' + this.selectedObject.userData.objectId;
                 document.getElementById('scaleSlider').value = this.selectedObject.scale.x;
                 document.getElementById('rotateSlider').value = (this.selectedObject.rotation.y * 180 / Math.PI) % 360;
@@ -697,7 +991,6 @@
             updateHighlightBox() {
                 if (!this.selectedObject || !this.highlightBox) return;
 
-                // Calculate bounding box of the selected object
                 const box = new THREE.Box3().setFromObject(this.selectedObject);
                 const size = new THREE.Vector3();
                 const center = new THREE.Vector3();
@@ -705,7 +998,6 @@
                 box.getSize(size);
                 box.getCenter(center);
 
-                // Update highlight box
                 this.highlightBox.scale.copy(size);
                 this.highlightBox.position.copy(center);
                 this.highlightBox.visible = true;
@@ -729,10 +1021,8 @@
 
                 const objectId = this.selectedObject.userData.objectId;
                 
-                // Remove from scene
                 this.scene.remove(this.selectedObject);
                 
-                // Remove from placed objects array
                 const index = this.placedObjects.indexOf(this.selectedObject);
                 if (index > -1) {
                     this.placedObjects.splice(index, 1);
@@ -740,12 +1030,73 @@
                 
                 console.log('Object deleted:', objectId, 'Remaining objects:', this.placedObjects.length);
                 
-                // Deselect
                 this.deselectObject();
+            }
+
+            enterFPVMode() {
+                if (!this.selectedObject) {
+                    console.log('No object selected for FPV mode');
+                    return;
+                }
+
+                console.log('Entering FPV mode');
+                this.fpvMode = true;
+                this.fpvObject = this.selectedObject;
+
+                // Save original state
+                this.fpvOriginalScale.copy(this.fpvObject.scale);
+                this.fpvOriginalPosition.copy(this.fpvObject.position);
+
+                // Scale up to 1:1 (or close to it)
+                const targetScale = this.fpvOriginalScale.x * this.fpvTargetScale;
+                this.fpvObject.scale.set(targetScale, targetScale, targetScale);
+
+                // Set initial FPV camera position (at the base of the model + eye height)
+                this.fpvCameraPosition.copy(this.fpvObject.position);
+                this.fpvCameraPosition.y += this.fpvCameraOffset.y * targetScale;
+
+                // Hide AR UI and show FPV controls
+                this.reticle.visible = false;
+                this.highlightBox.visible = false;
+                document.getElementById('controls').style.display = 'none';
+                document.getElementById('instructions').style.display = 'none';
+                document.getElementById('fpvControls').style.display = 'flex';
+
+                console.log('FPV mode activated. Scale:', targetScale);
+            }
+
+            exitFPVMode() {
+                if (!this.fpvMode) return;
+
+                console.log('Exiting FPV mode');
+                this.fpvMode = false;
+
+                // Restore original state
+                if (this.fpvObject) {
+                    this.fpvObject.scale.copy(this.fpvOriginalScale);
+                    this.fpvObject.position.copy(this.fpvOriginalPosition);
+                }
+
+                // Reset movement state
+                Object.keys(this.movementState).forEach(key => {
+                    this.movementState[key] = false;
+                });
+
+                // Show AR UI and hide FPV controls
+                document.getElementById('controls').style.display = 'flex';
+                document.getElementById('instructions').style.display = 'block';
+                document.getElementById('fpvControls').style.display = 'none';
+
+                this.fpvObject = null;
+                
+                // Re-enable camera auto update
+                this.camera.matrixAutoUpdate = false;
+
+                console.log('FPV mode deactivated');
             }
             
             onScaleChange(value) {
-                if (this.selectedObject) {
+                if (this.selectedObject && !this.fpvMode) {
                     const scale = parseFloat(value);
                     this.selectedObject.scale.set(scale, scale, scale);
                     this.updateHighlightBox();
@@ -753,7 +1104,7 @@
             }
 
             onRotateChange(value) {
-                if (this.selectedObject) {
+                if (this.selectedObject && !this.fpvMode) {
                     const rotationY = parseFloat(value) * Math.PI / 180;
                     this.selectedObject.rotation.y = rotationY;
                     this.updateHighlightBox();
@@ -761,6 +1112,11 @@
             }
 
             resetObjects() {
+                // Exit FPV mode if active
+                if (this.fpvMode) {
+                    this.exitFPVMode();
+                }
+
                 this.placedObjects.forEach(object => {
                     this.scene.remove(object);
                 });
@@ -782,6 +1138,7 @@
                 document.getElementById('ui').style.display = 'block';
                 document.getElementById('instructions').style.display = 'none';
                 document.getElementById('controls').style.display = 'none';
+                document.getElementById('fpvControls').style.display = 'none';
                 
                 console.log('AR session ended');
             }
@@ -802,6 +1159,8 @@
                 this.renderer = null;
                 this.referenceSpace = null;
                 this.viewerSpace = null;
+                this.fpvMode = false;
+                this.fpvObject = null;
             }
         }
         
