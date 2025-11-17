@@ -258,7 +258,7 @@
         }
 
         .dpad-button:active {
-            background: rgba(200,200,200,0.9);
+            background: rgba(100,200,100,0.9);
         }
 
         .dpad-button.empty {
@@ -299,7 +299,13 @@
         }
 
         .height-button:active {
-            background: rgba(200,200,200,0.9);
+            background: rgba(100,200,100,0.9);
+        }
+
+        #speedControl {
+            margin-top: 10px;
+            color: white;
+            font-size: 12px;
         }
         
         canvas {
@@ -383,6 +389,11 @@
                     <button class="height-button" id="moveUpButton">Naik ⬆</button>
                     <button class="height-button" id="moveDownButton">Turun ⬇</button>
                 </div>
+                <div id="speedControl">
+                    <label for="speedSlider">Kecepatan: </label>
+                    <input type="range" id="speedSlider" min="0.5" max="3" value="1" step="0.5">
+                    <span id="speedValue">1x</span>
+                </div>
                 <button id="fpvExitButton">Keluar Mode FPV</button>
             </div>
         </div>
@@ -419,13 +430,12 @@
                 // FPV Mode
                 this.fpvMode = false;
                 this.fpvObject = null;
-                this.fpvCameraOffset = new THREE.Vector3(0, 1.6, 0); // Eye height ~1.6m
-                this.fpvMovementSpeed = 0.05; // meters per frame
                 this.fpvOriginalScale = new THREE.Vector3();
                 this.fpvOriginalPosition = new THREE.Vector3();
-                this.fpvTargetScale = 10; // Scale multiplier for 1:1 mode
-                this.fpvCameraPosition = new THREE.Vector3();
-                this.fpvCameraRotation = 0;
+                this.fpvOriginalRotation = new THREE.Euler();
+                this.fpvTargetScale = 20; // Multiplier untuk scale 1:1
+                this.baseMovementSpeed = 0.1; // Base speed dalam meter
+                this.movementSpeedMultiplier = 1;
 
                 // Movement state
                 this.movementState = {
@@ -632,6 +642,7 @@
             setupFPVControls() {
                 const fpvControlsContainer = document.getElementById('fpvControls');
                 const fpvExitButton = document.getElementById('fpvExitButton');
+                const speedSlider = document.getElementById('speedSlider');
                 
                 // Prevent touch events from propagating
                 fpvControlsContainer.addEventListener('touchstart', (e) => {
@@ -651,6 +662,12 @@
                 this.setupMovementButton('rightButton', 'right');
                 this.setupMovementButton('moveUpButton', 'up');
                 this.setupMovementButton('moveDownButton', 'down');
+
+                // Speed control
+                speedSlider.addEventListener('input', (e) => {
+                    this.movementSpeedMultiplier = parseFloat(e.target.value);
+                    document.getElementById('speedValue').textContent = this.movementSpeedMultiplier + 'x';
+                });
 
                 // Exit FPV
                 fpvExitButton.addEventListener('click', () => {
@@ -686,7 +703,6 @@
                     this.lastUIInteraction = Date.now();
                 });
 
-                // Also stop on mouse leave
                 button.addEventListener('mouseleave', () => {
                     this.movementState[direction] = false;
                 });
@@ -790,91 +806,75 @@
                     if (!this.fpvMode) {
                         this.handleHitTest(frame);
                     } else {
-                        this.handleFPVMovement(frame);
+                        this.handleFPVMovement(pose);
                     }
                     
                     for (const view of pose.views) {
                         const viewport = this.session.renderState.baseLayer.getViewport(view);
                         this.renderer.setSize(viewport.width, viewport.height);
                         
-                        if (!this.fpvMode) {
-                            // Normal AR mode - use XR camera
-                            this.camera.matrix.fromArray(view.transform.matrix);
-                            this.camera.projectionMatrix.fromArray(view.projectionMatrix);
-                            this.camera.updateMatrixWorld(true);
-                        } else {
-                            // FPV mode - use custom camera position
-                            this.updateFPVCamera(view);
-                        }
+                        // Always use XR camera matrix
+                        this.camera.matrix.fromArray(view.transform.matrix);
+                        this.camera.projectionMatrix.fromArray(view.projectionMatrix);
+                        this.camera.updateMatrixWorld(true);
                         
                         this.renderer.render(this.scene, this.camera);
                     }
                 }
             }
 
-            handleFPVMovement(frame) {
+            handleFPVMovement(pose) {
                 if (!this.fpvObject) return;
 
-                const moveSpeed = this.fpvMovementSpeed;
+                const moveSpeed = this.baseMovementSpeed * this.movementSpeedMultiplier;
+                
+                // Get camera's current position and orientation
+                const view = pose.views[0];
+                const cameraMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
+                
+                // Extract forward and right vectors from camera
+                const forward = new THREE.Vector3(0, 0, -1);
+                const right = new THREE.Vector3(1, 0, 0);
+                
+                forward.applyMatrix4(cameraMatrix);
+                right.applyMatrix4(cameraMatrix);
+                
+                // Project to horizontal plane (remove Y component)
+                forward.y = 0;
+                forward.normalize();
+                right.y = 0;
+                right.normalize();
+
+                // Calculate movement offset
                 const movement = new THREE.Vector3();
-
-                // Get viewer orientation for look direction
-                const pose = frame.getViewerPose(this.referenceSpace);
-                if (pose) {
-                    const view = pose.views[0];
-                    const viewMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
-                    const forward = new THREE.Vector3(0, 0, -1);
-                    const right = new THREE.Vector3(1, 0, 0);
-                    
-                    forward.applyMatrix4(viewMatrix).normalize();
-                    right.applyMatrix4(viewMatrix).normalize();
-                    
-                    // Remove Y component for horizontal movement
-                    forward.y = 0;
-                    forward.normalize();
-                    right.y = 0;
-                    right.normalize();
-
-                    // Calculate movement based on button state
-                    if (this.movementState.forward) {
-                        movement.add(forward.multiplyScalar(moveSpeed));
-                    }
-                    if (this.movementState.backward) {
-                        movement.add(forward.multiplyScalar(-moveSpeed));
-                    }
-                    if (this.movementState.left) {
-                        movement.add(right.multiplyScalar(-moveSpeed));
-                    }
-                    if (this.movementState.right) {
-                        movement.add(right.multiplyScalar(moveSpeed));
-                    }
-                    if (this.movementState.up) {
-                        movement.y += moveSpeed;
-                    }
-                    if (this.movementState.down) {
-                        movement.y -= moveSpeed;
-                    }
-
-                    // Apply movement to FPV camera position
-                    this.fpvCameraPosition.add(movement);
+                
+                // INVERSE movement: when user "moves forward", world moves backward
+                if (this.movementState.forward) {
+                    movement.sub(forward.multiplyScalar(moveSpeed));
                 }
-            }
+                if (this.movementState.backward) {
+                    movement.add(forward.multiplyScalar(moveSpeed));
+                }
+                if (this.movementState.left) {
+                    movement.add(right.multiplyScalar(moveSpeed));
+                }
+                if (this.movementState.right) {
+                    movement.sub(right.multiplyScalar(moveSpeed));
+                }
+                if (this.movementState.up) {
+                    movement.y -= moveSpeed; // Move world down = user goes up
+                }
+                if (this.movementState.down) {
+                    movement.y += moveSpeed; // Move world up = user goes down
+                }
 
-            updateFPVCamera(view) {
-                // Get the real camera position and orientation from XR
-                const viewMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
-                
-                // Extract rotation from view transform
-                const rotation = new THREE.Euler().setFromRotationMatrix(viewMatrix);
-                
-                // Apply custom position with XR rotation
-                const finalPosition = this.fpvCameraPosition.clone();
-                
-                // Update camera
-                this.camera.position.copy(finalPosition);
-                this.camera.rotation.copy(rotation);
-                this.camera.projectionMatrix.fromArray(view.projectionMatrix);
-                this.camera.updateMatrixWorld(true);
+                // Apply movement to the FPV object
+                this.fpvObject.position.add(movement);
+
+                // Debug log
+                if (movement.length() > 0) {
+                    console.log('Moving object:', movement, 'New position:', this.fpvObject.position);
+                }
             }
             
             handleHitTest(frame) {
@@ -906,11 +906,9 @@
                 }
 
                 if (this.fpvMode) {
-                    // In FPV mode, ignore select events
                     return;
                 }
 
-                // Try to select an existing object first
                 const frame = event.frame;
                 const inputSource = event.inputSource;
                 
@@ -951,7 +949,6 @@
                     }
                 }
                 
-                // If no object was selected, place a new one
                 if (this.reticle.visible && this.arObject) {
                     this.placeObject();
                 }
@@ -1046,14 +1043,11 @@
                 // Save original state
                 this.fpvOriginalScale.copy(this.fpvObject.scale);
                 this.fpvOriginalPosition.copy(this.fpvObject.position);
+                this.fpvOriginalRotation.copy(this.fpvObject.rotation);
 
-                // Scale up to 1:1 (or close to it)
+                // Scale up to approximate 1:1
                 const targetScale = this.fpvOriginalScale.x * this.fpvTargetScale;
                 this.fpvObject.scale.set(targetScale, targetScale, targetScale);
-
-                // Set initial FPV camera position (at the base of the model + eye height)
-                this.fpvCameraPosition.copy(this.fpvObject.position);
-                this.fpvCameraPosition.y += this.fpvCameraOffset.y * targetScale;
 
                 // Hide AR UI and show FPV controls
                 this.reticle.visible = false;
@@ -1062,7 +1056,7 @@
                 document.getElementById('instructions').style.display = 'none';
                 document.getElementById('fpvControls').style.display = 'flex';
 
-                console.log('FPV mode activated. Scale:', targetScale);
+                console.log('FPV mode activated. Scale:', targetScale, 'Position:', this.fpvObject.position);
             }
 
             exitFPVMode() {
@@ -1075,6 +1069,7 @@
                 if (this.fpvObject) {
                     this.fpvObject.scale.copy(this.fpvOriginalScale);
                     this.fpvObject.position.copy(this.fpvOriginalPosition);
+                    this.fpvObject.rotation.copy(this.fpvOriginalRotation);
                 }
 
                 // Reset movement state
@@ -1088,9 +1083,6 @@
                 document.getElementById('fpvControls').style.display = 'none';
 
                 this.fpvObject = null;
-                
-                // Re-enable camera auto update
-                this.camera.matrixAutoUpdate = false;
 
                 console.log('FPV mode deactivated');
             }
@@ -1112,7 +1104,6 @@
             }
 
             resetObjects() {
-                // Exit FPV mode if active
                 if (this.fpvMode) {
                     this.exitFPVMode();
                 }
