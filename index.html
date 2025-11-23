@@ -404,8 +404,7 @@
                     <label for="modelSelect">Pilih Model:</label>
                     <select id="modelSelect">
                         <option value="tower_house_design.glb">Tower House</option>
-                        <option value="model2.glb">Model 2</option>
-                        <option value="model3.glb">Model 3</option>
+                        <option value="interior-fix2.glb">Kitchen</option>
                     </select>
                 </div>
                 <button class="control-button" id="resetButton">Reset Semua</button>
@@ -571,9 +570,55 @@
                 try {
                     const loader = new THREE.GLTFLoader();
 
-                    const reticleGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf');
-                    this.reticle = reticleGltf.scene;
+                    this.reticle = null;
+                    let reticleLoaded = false;
+                    try {
+                        const reticleGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf');
+                        this.reticle = reticleGltf.scene;
+                        reticleLoaded = true;
+                        console.log('External reticle loaded successfully');
+                    } catch (reticleError) {
+                        console.warn('Failed to load external reticle, creating fallback:', reticleError);
+
+                        // Create a simple ring geometry as fallback
+                        const ringGeometry = new THREE.RingGeometry(0.3, 0.4, 32);
+                        const ringMaterial = new THREE.MeshBasicMaterial({
+                            color: 0x007bff,
+                            transparent: true,
+                            opacity: 0.8,
+                            side: THREE.DoubleSide
+                        });
+                        this.reticle = new THREE.Mesh(ringGeometry, ringMaterial);
+                        reticleLoaded = true;
+                        console.log('Fallback reticle created');
+                    }
+
+                    if (!reticleLoaded || !this.reticle) {
+                        throw new Error('Failed to load reticle');
+                    }
+
                     this.reticle.visible = false;
+                    console.log('Reticle loaded:', this.reticle);
+                    console.log('Reticle children:', this.reticle.children);
+
+                    // Ensure reticle materials are properly set
+                    this.reticle.traverse((child) => {
+                        if (child.isMesh) {
+                            if (child.material) {
+                                if (Array.isArray(child.material)) {
+                                    child.material.forEach(mat => {
+                                        if (mat.transparent) {
+                                            mat.opacity = 1.0;
+                                        }
+                                    });
+                                } else {
+                                    if (child.material.transparent) {
+                                        child.material.opacity = 1.0;
+                                    }
+                                }
+                            }
+                        }
+                    });
 
                     // Define available models
                     this.availableModels = [
@@ -879,9 +924,10 @@
                     this.referenceSpace = await this.session.requestReferenceSpace('local');
                     this.viewerSpace = await this.session.requestReferenceSpace('viewer');
                     
-                    this.hitTestSource = await this.session.requestHitTestSource({ 
-                        space: this.viewerSpace 
+                    this.hitTestSource = await this.session.requestHitTestSource({
+                        space: this.viewerSpace
                     });
+                    console.log('Hit test source created:', this.hitTestSource);
                     
                     this.session.addEventListener('end', () => this.onSessionEnded());
                     this.session.addEventListener('select', (event) => this.onSelect(event));
@@ -990,23 +1036,36 @@
             }
             
             handleHitTest(frame) {
-                if (!this.hitTestSource || !this.reticle) return;
-                
+                if (!this.hitTestSource || !this.reticle) {
+                    console.log('Hit test source or reticle not available');
+                    return;
+                }
+
                 const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-                
+                console.log('Hit test results:', hitTestResults.length);
+
                 if (hitTestResults.length > 0) {
                     const hitPose = hitTestResults[0].getPose(this.referenceSpace);
-                    
-                    this.reticle.visible = true;
-                    this.reticle.position.set(
-                        hitPose.transform.position.x,
-                        hitPose.transform.position.y,
-                        hitPose.transform.position.z
-                    );
-                    this.reticle.updateMatrixWorld(true);
+
+                    if (hitPose) {
+                        this.reticle.visible = true;
+                        this.reticle.position.set(
+                            hitPose.transform.position.x,
+                            hitPose.transform.position.y,
+                            hitPose.transform.position.z
+                        );
+                        this.reticle.updateMatrixWorld(true);
+                        console.log('Reticle positioned at:', this.reticle.position);
+                    } else {
+                        this.reticle.visible = false;
+                        console.log('No hit pose available');
+                    }
                 } else {
                     this.reticle.visible = false;
+                    console.log('No hit test results');
                 }
+
+                console.log('Reticle visible:', this.reticle.visible);
             }
             
             onSelect(event) {
