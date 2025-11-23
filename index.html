@@ -1130,8 +1130,21 @@
             }
 
             placeObject() {
-                const clone = this.arObject.clone();
+                const clone = this.arObject.clone(); // Clone the scene
+                
+                // Calculate bounding box for the clone
+                const box = new THREE.Box3().setFromObject(clone);
+                const center = new THREE.Vector3();
+                box.getCenter(center);
+                
+                // Adjust the clone's position to align its visual center with the reticle
+                // We want the reticle position to be the center of the object.
+                // So, if the model's internal origin is (0,0,0) and its center is (1,0,0),
+                // and the reticle is at (X,Y,Z), we need to place the model at (X-1, Y, Z)
+                // such that its visual center (X-1+1, Y, Z) == (X,Y,Z)
                 clone.position.copy(this.reticle.position);
+                clone.position.sub(center); // Subtract the center to shift the origin
+                
                 clone.rotation.y = 0;
                 clone.scale.set(1, 1, 1);
                 
