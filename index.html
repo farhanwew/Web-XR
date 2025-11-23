@@ -267,7 +267,7 @@
         }
 
         #fpvExitButton {
-            position: absolute;
+            position: fixed;
             top: 20px;
             right: 20px;
             z-index: 1002;
@@ -278,7 +278,33 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        }
+
+        #exitButton {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001;
+            padding: 12px 20px;
+            font-size: 16px;
+            background: rgba(220, 53, 69, 0.9);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        }
+
+        #exitButton:hover {
+            background: rgba(220, 53, 69, 1);
+        }
+
+        #controls-main {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
         }
 
         #fpvExitButton:hover {
@@ -311,6 +337,27 @@
             margin-top: 10px;
             color: white;
             font-size: 12px;
+        }
+
+        .model-selector {
+            margin: 10px 0;
+            color: white;
+            font-size: 14px;
+        }
+
+        .model-selector select {
+            padding: 8px 12px;
+            font-size: 14px;
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .model-selector select:focus {
+            outline: 2px solid #007bff;
         }
         
         canvas {
@@ -348,11 +395,20 @@
             Arahkan kamera ke permukaan datar, lalu ketuk layar untuk menempatkan objek.<br>
             Ketuk objek untuk memilih dan memanipulasi.
         </div>
-        
+
+        <button id="exitButton" style="display: none;">Keluar AR</button>
+
         <div id="controls">
             <div id="controls-main">
+                <div class="model-selector">
+                    <label for="modelSelect">Pilih Model:</label>
+                    <select id="modelSelect">
+                        <option value="tower_house_design.glb">Tower House</option>
+                        <option value="model2.glb">Model 2</option>
+                        <option value="model3.glb">Model 3</option>
+                    </select>
+                </div>
                 <button class="control-button" id="resetButton">Reset Semua</button>
-                <button class="control-button" id="exitButton">Keluar AR</button>
             </div>
             <div id="controls-manipulation">
                 <div id="objectInfo">Objek dipilih: <span id="selectedObjectId">-</span></div>
@@ -419,9 +475,11 @@
                 this.referenceSpace = null;
                 this.viewerSpace = null;
                 this.hitTestSource = null;
-                
+
                 this.reticle = null;
                 this.arObject = null;
+                this.availableModels = [];
+                this.currentModelIndex = 0;
                 this.placedObjects = [];
                 this.selectedObject = null;
                 this.objectIndex = 0;
@@ -509,16 +567,23 @@
             async loadModels() {
                 const statusEl = document.getElementById('status');
                 const startButton = document.getElementById('startButton');
-                
+
                 try {
                     const loader = new THREE.GLTFLoader();
-                    
+
                     const reticleGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf');
                     this.reticle = reticleGltf.scene;
                     this.reticle.visible = false;
-                    
-                    const objectGltf = await this.loadGLTF(loader, 'tower_house_design.glb');
-                    this.arObject = objectGltf.scene;
+
+                    // Define available models
+                    this.availableModels = [
+                        { name: 'Tower House', url: 'tower_house_design.glb' },
+                        { name: 'Modern House', url: 'modern_house.glb' },
+                        { name: 'Building Model', url: 'building_model.glb' }
+                    ];
+
+                    // Load the first model
+                    await this.loadSpecificModel(loader, this.availableModels[0].url);
                     
                     this.arObject.traverse((child) => {
                         if (child.isMesh) {
@@ -537,22 +602,40 @@
                                     }
                                 }
                             }
-                            
+
                             child.castShadow = true;
                             child.receiveShadow = true;
                         }
                     });
-                    
+
                     statusEl.innerHTML = 'Model berhasil dimuat! Siap memulai AR';
                     startButton.textContent = 'Mulai AR';
                     startButton.disabled = false;
-                    
+
                     console.log('Models loaded successfully');
-                    
+
                 } catch (error) {
                     console.error('Error loading models:', error);
                     statusEl.innerHTML = 'Gagal memuat model: ' + error.message;
                     startButton.textContent = 'Error Memuat Model';
+                }
+            }
+
+            async loadSpecificModel(loader, modelUrl) {
+                try {
+                    const objectGltf = await this.loadGLTF(loader, modelUrl);
+                    this.arObject = objectGltf.scene;
+
+                    // Clear previous placed objects that used the old model
+                    this.placedObjects.forEach(obj => {
+                        this.scene.remove(obj);
+                    });
+                    this.placedObjects = [];
+                    this.deselectObject();
+
+                } catch (error) {
+                    console.error(`Error loading model ${modelUrl}:`, error);
+                    throw error;
                 }
             }
             
@@ -571,9 +654,25 @@
                 const fpvButton = document.getElementById('fpvButton');
                 const scaleSlider = document.getElementById('scaleSlider');
                 const rotateSlider = document.getElementById('rotateSlider');
+                const modelSelect = document.getElementById('modelSelect');
                 const controlsContainer = document.getElementById('controls');
-                
+
                 startButton.addEventListener('click', () => this.startAR());
+
+                // Model selector event
+                modelSelect.addEventListener('change', (e) => {
+                    const selectedModel = this.availableModels.find(model => model.url === e.target.value);
+                    if (selectedModel && this.arObject) {
+                        this.loadSpecificModel(new THREE.GLTFLoader(), selectedModel.url)
+                            .then(() => {
+                                console.log(`Switched to model: ${selectedModel.name}`);
+                            })
+                            .catch(error => {
+                                console.error('Failed to load selected model:', error);
+                                alert('Gagal memuat model yang dipilih');
+                            });
+                    }
+                });
                 
                 // Controls container events
                 controlsContainer.addEventListener('touchstart', (e) => {
@@ -793,6 +892,7 @@
                     document.getElementById('ui').style.display = 'none';
                     document.getElementById('instructions').style.display = 'block';
                     document.getElementById('controls').style.display = 'flex';
+                    document.getElementById('exitButton').style.display = 'block';
                     
                     console.log('AR session started successfully');
                     
@@ -1106,49 +1206,126 @@
                     return finalMovement;
                 }
 
+                // Get all collision objects from the scene (all placed objects except the current FPV object)
                 const collisionObjects = [];
-                this.fpvObject.traverse(child => {
-                    if (child.isMesh) {
-                        collisionObjects.push(child);
+                this.placedObjects.forEach(obj => {
+                    if (obj !== this.fpvObject) {
+                        obj.traverse(child => {
+                            if (child.isMesh) {
+                                collisionObjects.push(child);
+                            }
+                        });
                     }
                 });
+
                 if (collisionObjects.length === 0) return finalMovement;
 
-                // Iterate a few times to handle sliding in corners more gracefully
-                for (let i = 0; i < 5; i++) {
-                    const playerWorldPos = new THREE.Vector3(0, 0, 0); // Player (camera) is at the world origin
-                    const movementDirection = finalMovement.clone().normalize();
-                    
-                    if (movementDirection.lengthSq() === 0) break; // No movement left, no need to check
+                // Player position (camera) at world origin
+                const playerPos = new THREE.Vector3(0, 0, 0);
+                const playerRadius = 0.5; // Slightly larger radius for better collision detection
+                const playerHeight = 1.8; // Height for vertical collision
 
-                    this.collisionRaycaster.set(playerWorldPos, movementDirection);
-                    this.collisionRaycaster.near = 0;
-                    // Check for collisions just ahead of the player's radius
-                    this.collisionRaycaster.far = this.playerRadius;
+                let adjustedMovement = finalMovement.clone();
 
-                    const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                // Check horizontal collisions (x, z plane)
+                const horizontalMovement = new THREE.Vector3(adjustedMovement.x, 0, adjustedMovement.z);
+                if (horizontalMovement.lengthSq() > 0) {
+                    const horizontalDirection = horizontalMovement.clone().normalize();
 
-                    if (intersects.length > 0) {
-                        // A collision is happening within the player's radius.
-                        const hitNormal = intersects[0].face.normal;
-                        
-                        // Project the movement vector onto the hit normal.
-                        // This gives us the part of the movement that is directed INTO the wall.
-                        const projection = finalMovement.clone().projectOnVector(hitNormal);
+                    // Cast multiple rays for better collision detection
+                    const rays = [
+                        horizontalDirection,
+                        horizontalDirection.clone().multiplyScalar(0.8).add(new THREE.Vector3(0.3, 0, 0.3).normalize()),
+                        horizontalDirection.clone().multiplyScalar(0.8).add(new THREE.Vector3(-0.3, 0, -0.3).normalize())
+                    ];
 
-                        // Subtract that projection from the movement.
-                        // This removes the "into the wall" component, leaving only the "along the wall" (sliding) component.
-                        // We only do this if the projection is against the movement direction.
-                        if (projection.dot(hitNormal) < 0) {
-                            finalMovement.sub(projection);
+                    let collisionDetected = false;
+
+                    for (const ray of rays) {
+                        this.collisionRaycaster.set(playerPos, ray);
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = playerRadius + 0.1;
+
+                        const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+
+                        if (intersects.length > 0) {
+                            collisionDetected = true;
+                            const hitNormal = intersects[0].face.normal;
+                            hitNormal.y = 0; // Ensure we only consider horizontal collision
+                            hitNormal.normalize();
+
+                            // Slide along the surface
+                            const slideDirection = horizontalMovement.clone().projectOnPlane(hitNormal);
+                            if (slideDirection.lengthSq() > 0) {
+                                adjustedMovement.x = slideDirection.x;
+                                adjustedMovement.z = slideDirection.z;
+                            } else {
+                                // If can't slide, stop movement in this direction
+                                adjustedMovement.x = 0;
+                                adjustedMovement.z = 0;
+                            }
+                            break;
                         }
-                    } else {
-                        // No collision was detected for this iteration, so we can exit the loop.
-                        break; 
                     }
                 }
-                
-                return finalMovement;
+
+                // Check vertical collisions (y axis)
+                if (Math.abs(adjustedMovement.y) > 0) {
+                    // Check ground collision (below)
+                    if (adjustedMovement.y < 0) {
+                        this.collisionRaycaster.set(
+                            playerPos.clone().add(new THREE.Vector3(0, -playerHeight/2, 0)),
+                            new THREE.Vector3(0, -1, 0)
+                        );
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = playerHeight;
+
+                        const groundIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                        if (groundIntersects.length > 0 && groundIntersects[0].distance < 0.1) {
+                            adjustedMovement.y = 0; // Stop downward movement
+                        }
+                    }
+
+                    // Check ceiling collision (above)
+                    if (adjustedMovement.y > 0) {
+                        this.collisionRaycaster.set(
+                            playerPos.clone().add(new THREE.Vector3(0, playerHeight/2, 0)),
+                            new THREE.Vector3(0, 1, 0)
+                        );
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = 2;
+
+                        const ceilingIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                        if (ceilingIntersects.length > 0 && ceilingIntersects[0].distance < 0.1) {
+                            adjustedMovement.y = 0; // Stop upward movement
+                        }
+                    }
+                }
+
+                // Final distance check to prevent getting too close to objects
+                const testPos = playerPos.clone().add(adjustedMovement);
+                this.collisionRaycaster.set(playerPos, testPos.clone().sub(playerPos).normalize());
+                this.collisionRaycaster.near = 0;
+                this.collisionRaycaster.far = adjustedMovement.length() + 0.1;
+
+                const finalIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                if (finalIntersects.length > 0 && finalIntersects[0].distance < playerRadius) {
+                    // If collision detected, reduce movement
+                    adjustedMovement.multiplyScalar(0.5);
+
+                    // If still colliding, stop movement completely
+                    const testPos2 = playerPos.clone().add(adjustedMovement);
+                    this.collisionRaycaster.set(playerPos, testPos2.clone().sub(playerPos).normalize());
+                    this.collisionRaycaster.near = 0;
+                    this.collisionRaycaster.far = adjustedMovement.length() + 0.01;
+
+                    const finalIntersects2 = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                    if (finalIntersects2.length > 0 && finalIntersects2[0].distance < playerRadius) {
+                        adjustedMovement.set(0, 0, 0);
+                    }
+                }
+
+                return adjustedMovement;
             }
 
             onScaleChange(value) {
@@ -1194,6 +1371,7 @@
                 document.getElementById('instructions').style.display = 'none';
                 document.getElementById('controls').style.display = 'none';
                 document.getElementById('fpvControls').style.display = 'none';
+                document.getElementById('exitButton').style.display = 'none';
                 
                 console.log('AR session ended');
             }
