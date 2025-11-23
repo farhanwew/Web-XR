@@ -67,7 +67,7 @@
             position: fixed;
             top: 20px;
             left: 20px;
-            right: 20px;
+            right: 120px; /* Give space for exit button, assuming ~100px width + padding */
             background: rgba(0,123,255,0.9);
             color: white;
             padding: 15px;
@@ -76,6 +76,7 @@
             text-align: center;
             z-index: 1000;
             display: none;
+            max-width: calc(100% - 140px); /* Adjust max-width to account for button */
         }
         
         #controls {
