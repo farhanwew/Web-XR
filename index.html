@@ -512,7 +512,7 @@
                     this.reticle = reticleGltf.scene;
                     this.reticle.visible = false;
                     
-                    const objectGltf = await this.loadGLTF(loader, 'interior.glb');
+                    const objectGltf = await this.loadGLTF(loader, 'interior-fix.glb');
                     this.arObject = objectGltf.scene;
                     
                     this.arObject.traverse((child) => {
