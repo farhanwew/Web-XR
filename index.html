@@ -436,6 +436,11 @@
                 this.fpvTargetScale = 20; // Multiplier untuk scale 1:1
                 this.baseMovementSpeed = 0.1; // Base speed dalam meter
                 this.movementSpeedMultiplier = 1;
+                
+                // FPV Collision Detection Properties
+                this.playerHeight = 1.7; // Approx user height in meters
+                this.playerRadius = 0.3; // Approx user radius
+                this.collisionRaycaster = new THREE.Raycaster(); // Dedicated raycaster for FPV collisions
 
                 // Movement state
                 this.movementState = {
@@ -845,35 +850,38 @@
                 right.y = 0;
                 right.normalize();
 
-                // Calculate movement offset
-                const movement = new THREE.Vector3();
+                // Calculate desired movement offset
+                const desiredMovement = new THREE.Vector3();
                 
                 // INVERSE movement: when user "moves forward", world moves backward
                 if (this.movementState.forward) {
-                    movement.sub(forward.multiplyScalar(moveSpeed));
+                    desiredMovement.sub(forward.multiplyScalar(moveSpeed));
                 }
                 if (this.movementState.backward) {
-                    movement.add(forward.multiplyScalar(moveSpeed));
+                    desiredMovement.add(forward.multiplyScalar(moveSpeed));
                 }
                 if (this.movementState.left) {
-                    movement.add(right.multiplyScalar(moveSpeed));
+                    desiredMovement.add(right.multiplyScalar(moveSpeed));
                 }
                 if (this.movementState.right) {
-                    movement.sub(right.multiplyScalar(moveSpeed));
+                    desiredMovement.sub(right.multiplyScalar(moveSpeed));
                 }
                 if (this.movementState.up) {
-                    movement.y -= moveSpeed; // Move world down = user goes up
+                    desiredMovement.y -= moveSpeed; // Move world down = user goes up
                 }
                 if (this.movementState.down) {
-                    movement.y += moveSpeed; // Move world up = user goes down
+                    desiredMovement.y += moveSpeed; // Move world up = user goes down
                 }
 
-                // Apply movement to the FPV object
-                this.fpvObject.position.add(movement);
+                // --- INTEGRATE COLLISION CHECK HERE ---
+                const adjustedMovement = this.checkFPVCollisions(desiredMovement);
+
+                // Apply adjusted movement to the FPV object
+                this.fpvObject.position.add(adjustedMovement);
 
                 // Debug log
-                if (movement.length() > 0) {
-                    console.log('Moving object:', movement, 'New position:', this.fpvObject.position);
+                if (adjustedMovement.length() > 0) { // Log only if actual movement occurred
+                    console.log('Moving object:', adjustedMovement, 'New position:', this.fpvObject.position);
                 }
             }
             
@@ -1087,6 +1095,74 @@
                 console.log('FPV mode deactivated');
             }
             
+            checkFPVCollisions(movementVector) {
+                const effectiveMovement = movementVector.clone();
+                if (!this.fpvObject || effectiveMovement.length() === 0) {
+                    return effectiveMovement;
+                }
+
+                // In FPV mode, the camera is effectively stationary at (0,0,0) in AR world space,
+                // and the environment (fpvObject) moves around it.
+                // So, collisions are checked between a conceptual "player capsule" at (0,0,0)
+                // and the fpvObject, considering its *future* position.
+
+                const playerHalfHeight = this.playerHeight / 2;
+                const playerWorldPos = new THREE.Vector3(0, 0, 0); // Camera is the player's reference point
+
+                const collisionObjects = [];
+                this.fpvObject.traverse(child => {
+                    if (child.isMesh) {
+                        collisionObjects.push(child);
+                    }
+                });
+
+                if (collisionObjects.length === 0) {
+                    return effectiveMovement;
+                }
+
+                // Test rays from different points of the player's "capsule"
+                const rayOrigins = [
+                    new THREE.Vector3(0, 0, 0), // Center of player (camera position)
+                    new THREE.Vector3(0, playerHalfHeight, 0), // Top of player
+                    new THREE.Vector3(0, -playerHalfHeight, 0), // Bottom of player
+                    new THREE.Vector3(this.playerRadius * 0.8, 0, 0), // Slightly right
+                    new THREE.Vector3(-this.playerRadius * 0.8, 0, 0),// Slightly left
+                    new THREE.Vector3(0, 0, this.playerRadius * 0.8), // Slightly forward (adjusted)
+                    new THREE.Vector3(0, 0, -this.playerRadius * 0.8) // Slightly backward (adjusted)
+                ];
+
+                const movementDistance = effectiveMovement.length();
+                let blockedMovementScale = 1.0; // Scale factor for how much movement is allowed
+
+                for (const originOffset of rayOrigins) {
+                    const origin = playerWorldPos.clone().add(originOffset);
+                    this.collisionRaycaster.set(origin, effectiveMovement.clone().normalize());
+                    this.collisionRaycaster.near = 0;
+                    this.collisionRaycaster.far = movementDistance + this.playerRadius * 0.5; // Check slightly beyond player's "edge"
+
+                    const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+
+                    if (intersects.length > 0) {
+                        const intersection = intersects[0];
+                        // If the intersection is very close or already inside, block movement completely
+                        if (intersection.distance < this.playerRadius * 0.5) {
+                            blockedMovementScale = 0;
+                            break;
+                        } else {
+                            // Calculate how much movement is possible before collision
+                            const remainingDistance = intersection.distance - (this.playerRadius * 0.5); // Distance to stop at the "surface"
+                            const currentScale = remainingDistance / movementDistance;
+                            if (currentScale < blockedMovementScale) {
+                                blockedMovementScale = Math.max(0, currentScale); // Ensure it's not negative
+                            }
+                        }
+                    }
+                }
+
+                effectiveMovement.multiplyScalar(blockedMovementScale);
+                return effectiveMovement;
+            }
+
             onScaleChange(value) {
                 if (this.selectedObject && !this.fpvMode) {
                     const scale = parseFloat(value);
