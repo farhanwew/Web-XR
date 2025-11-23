@@ -405,6 +405,8 @@
                     <select id="modelSelect">
                         <option value="tower_house_design.glb">Tower House</option>
                         <option value="interior-fix2.glb">Kitchen</option>
+                        <option value="Astronaut.glb">Astronaut</option>
+                        <option value="3_bedroom_house.glb">3 Bedroom House</option>
                     </select>
                 </div>
                 <button class="control-button" id="resetButton">Reset Semua</button>
@@ -1264,16 +1266,13 @@
                     return finalMovement;
                 }
 
-                // Get all collision objects from the scene (all placed objects except the current FPV object)
                 const collisionObjects = [];
                 this.placedObjects.forEach(obj => {
-                    if (obj !== this.fpvObject) {
-                        obj.traverse(child => {
-                            if (child.isMesh) {
-                                collisionObjects.push(child);
-                            }
-                        });
-                    }
+                    obj.traverse(child => {
+                        if (child.isMesh) {
+                            collisionObjects.push(child);
+                        }
+                    });
                 });
 
                 if (collisionObjects.length === 0) return finalMovement;
@@ -1285,105 +1284,123 @@
 
                 let adjustedMovement = finalMovement.clone();
 
-                // Check horizontal collisions (x, z plane)
-                const horizontalMovement = new THREE.Vector3(adjustedMovement.x, 0, adjustedMovement.z);
-                if (horizontalMovement.lengthSq() > 0) {
-                    const horizontalDirection = horizontalMovement.clone().normalize();
+                // Invert the movement vector for collision checks, as fpvObject moves inversely to camera
+                const invertedMovement = finalMovement.clone().negate();
 
-                    // Cast multiple rays for better collision detection
+                // Check horizontal collisions (x, z plane)
+                const horizontalMovementAttempt = new THREE.Vector3(invertedMovement.x, 0, invertedMovement.z);
+                if (horizontalMovementAttempt.lengthSq() > 0) {
+                    const horizontalDirection = horizontalMovementAttempt.clone().normalize();
+
+                    // Cast multiple rays for better collision detection (e.g., from player's front-left, front, front-right)
                     const rays = [
                         horizontalDirection,
-                        horizontalDirection.clone().multiplyScalar(0.8).add(new THREE.Vector3(0.3, 0, 0.3).normalize()),
-                        horizontalDirection.clone().multiplyScalar(0.8).add(new THREE.Vector3(-0.3, 0, -0.3).normalize())
+                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), Math.PI / 4), // 45 degrees left
+                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), -Math.PI / 4) // 45 degrees right
                     ];
 
                     let collisionDetected = false;
-
                     for (const ray of rays) {
                         this.collisionRaycaster.set(playerPos, ray);
                         this.collisionRaycaster.near = 0;
-                        this.collisionRaycaster.far = playerRadius + 0.1;
+                        this.collisionRaycaster.far = playerRadius + horizontalMovementAttempt.length(); // Check a bit further than radius for upcoming collision
 
                         const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
 
                         if (intersects.length > 0) {
-                            collisionDetected = true;
-                            const hitNormal = intersects[0].face.normal;
-                            hitNormal.y = 0; // Ensure we only consider horizontal collision
-                            hitNormal.normalize();
-
-                            // Slide along the surface
-                            const slideDirection = horizontalMovement.clone().projectOnPlane(hitNormal);
-                            if (slideDirection.lengthSq() > 0) {
-                                adjustedMovement.x = slideDirection.x;
-                                adjustedMovement.z = slideDirection.z;
-                            } else {
-                                // If can't slide, stop movement in this direction
-                                adjustedMovement.x = 0;
-                                adjustedMovement.z = 0;
+                            const firstHit = intersects[0];
+                            if (firstHit.distance < playerRadius) { // Already intersecting or very close
+                                collisionDetected = true;
+                                break;
                             }
-                            break;
+                            // If an obstacle is detected in the path, try to slide
+                            if (firstHit.distance < horizontalMovementAttempt.length() + playerRadius) {
+                                const hitNormal = firstHit.face.normal;
+                                hitNormal.y = 0; // Ensure we only consider horizontal collision
+                                hitNormal.normalize();
+
+                                const slideDirection = horizontalMovementAttempt.clone().projectOnPlane(hitNormal);
+                                if (slideDirection.lengthSq() > 0) {
+                                    // Apply slide correction by adjusting the original movementVector inversely
+                                    const invertedSlide = slideDirection.negate();
+                                    adjustedMovement.x = invertedSlide.x;
+                                    adjustedMovement.z = invertedSlide.z;
+                                } else {
+                                    // If can't slide, stop movement in this direction (original movement)
+                                    adjustedMovement.x = 0;
+                                    adjustedMovement.z = 0;
+                                }
+                                collisionDetected = true;
+                                break; // Break from ray loop, as we found a collision and handled it.
+                            }
                         }
+                    }
+
+                    if (collisionDetected && adjustedMovement.lengthSq() === 0) {
+                        // If collision was detected and no slide could be performed, stop horizontal movement
+                        finalMovement.x = 0;
+                        finalMovement.z = 0;
+                    } else if (collisionDetected) {
+                        // Apply the adjusted (sliding) movement
+                        finalMovement.x = adjustedMovement.x;
+                        finalMovement.z = adjustedMovement.z;
                     }
                 }
 
-                // Check vertical collisions (y axis)
-                if (Math.abs(adjustedMovement.y) > 0) {
-                    // Check ground collision (below)
-                    if (adjustedMovement.y < 0) {
-                        this.collisionRaycaster.set(
-                            playerPos.clone().add(new THREE.Vector3(0, -playerHeight/2, 0)),
-                            new THREE.Vector3(0, -1, 0)
-                        );
-                        this.collisionRaycaster.near = 0;
-                        this.collisionRaycaster.far = playerHeight;
+                // Check vertical collisions (y axis) for player head and feet
+                const verticalMovementAttempt = invertedMovement.y;
+                if (Math.abs(verticalMovementAttempt) > 0) {
+                    const headPos = playerPos.clone().add(new THREE.Vector3(0, playerHeight / 2 - playerRadius / 2, 0)); // Slightly below head
+                    const feetPos = playerPos.clone().add(new THREE.Vector3(0, -playerHeight / 2 + playerRadius / 2, 0)); // Slightly above feet
 
-                        const groundIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                        if (groundIntersects.length > 0 && groundIntersects[0].distance < 0.1) {
-                            adjustedMovement.y = 0; // Stop downward movement
-                        }
-                    }
-
-                    // Check ceiling collision (above)
-                    if (adjustedMovement.y > 0) {
-                        this.collisionRaycaster.set(
-                            playerPos.clone().add(new THREE.Vector3(0, playerHeight/2, 0)),
-                            new THREE.Vector3(0, 1, 0)
-                        );
+                    // Check ceiling collision (if moving up)
+                    if (verticalMovementAttempt > 0) { // Camera trying to move up
+                        this.collisionRaycaster.set(headPos, new THREE.Vector3(0, 1, 0)); // Ray points upwards
                         this.collisionRaycaster.near = 0;
-                        this.collisionRaycaster.far = 2;
+                        this.collisionRaycaster.far = verticalMovementAttempt + playerRadius;
 
                         const ceilingIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                        if (ceilingIntersects.length > 0 && ceilingIntersects[0].distance < 0.1) {
-                            adjustedMovement.y = 0; // Stop upward movement
+                        if (ceilingIntersects.length > 0 && ceilingIntersects[0].distance < verticalMovementAttempt + playerRadius / 2) {
+                            finalMovement.y = 0; // Stop upward movement (of fpvObject)
+                        }
+                    }
+                    // Check ground collision (if moving down)
+                    else if (verticalMovementAttempt < 0) { // Camera trying to move down
+                        this.collisionRaycaster.set(feetPos, new THREE.Vector3(0, -1, 0)); // Ray points downwards
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = Math.abs(verticalMovementAttempt) + playerRadius;
+
+                        const groundIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                        if (groundIntersects.length > 0 && groundIntersects[0].distance < Math.abs(verticalMovementAttempt) + playerRadius / 2) {
+                            finalMovement.y = 0; // Stop downward movement (of fpvObject)
                         }
                     }
                 }
+                
+                // Final check for penetration after adjusting movement for sliding.
+                // Cast rays from playerPos to the *potential* new position if no collision was detected earlier.
+                // This acts as a last resort to prevent passing through objects.
+                const newPlayerPosAttempt = playerPos.clone().add(invertedMovement.clone().multiplyScalar(1)); // Apply full inverted movement for check
 
-                // Final distance check to prevent getting too close to objects
-                const testPos = playerPos.clone().add(adjustedMovement);
-                this.collisionRaycaster.set(playerPos, testPos.clone().sub(playerPos).normalize());
+                // Check from playerPos to newPlayerPosAttempt. If it intersects something, limit movement.
+                this.collisionRaycaster.set(playerPos, newPlayerPosAttempt.clone().sub(playerPos).normalize());
                 this.collisionRaycaster.near = 0;
-                this.collisionRaycaster.far = adjustedMovement.length() + 0.1;
+                this.collisionRaycaster.far = invertedMovement.length() + playerRadius; // Ray length from playerPos
 
-                const finalIntersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                if (finalIntersects.length > 0 && finalIntersects[0].distance < playerRadius) {
-                    // If collision detected, reduce movement
-                    adjustedMovement.multiplyScalar(0.5);
-
-                    // If still colliding, stop movement completely
-                    const testPos2 = playerPos.clone().add(adjustedMovement);
-                    this.collisionRaycaster.set(playerPos, testPos2.clone().sub(playerPos).normalize());
-                    this.collisionRaycaster.near = 0;
-                    this.collisionRaycaster.far = adjustedMovement.length() + 0.01;
-
-                    const finalIntersects2 = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                    if (finalIntersects2.length > 0 && finalIntersects2[0].distance < playerRadius) {
-                        adjustedMovement.set(0, 0, 0);
+                const finalPenetrationCheck = this.collisionRaycaster.intersectObjects(collisionObjects, true);
+                if (finalPenetrationCheck.length > 0 && finalPenetrationCheck[0].distance < invertedMovement.length()) {
+                    // If moving into an object, try to reduce movement
+                    const hitDistance = finalPenetrationCheck[0].distance;
+                    const remainingMovementRatio = Math.max(0, (hitDistance - playerRadius / 2) / invertedMovement.length()); // Move just to surface
+                    finalMovement.multiplyScalar(remainingMovementRatio);
+                    
+                    // If ratio is too small, just stop it
+                    if (remainingMovementRatio < 0.1) {
+                        finalMovement.set(0,0,0);
                     }
                 }
 
-                return adjustedMovement;
+                return finalMovement;
             }
 
             onScaleChange(value) {
