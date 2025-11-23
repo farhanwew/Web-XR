@@ -267,7 +267,11 @@
         }
 
         #fpvExitButton {
-            padding: 12px 30px;
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1002;
+            padding: 12px 20px;
             font-size: 16px;
             background: rgba(220, 53, 69, 0.9);
             color: white;
@@ -283,6 +287,7 @@
 
         #heightControls {
             display: flex;
+            flex-direction: column;
             gap: 10px;
             margin-top: 10px;
         }
@@ -369,6 +374,7 @@
 
         <!-- FPV Controls -->
         <div id="fpvControls">
+            <button id="fpvExitButton">Keluar Mode FPV</button>
             <div id="fpvInfo">
                 Mode First-Person View 🏠<br>
                 <small>Jelajahi model dalam skala 1:1</small>
@@ -394,7 +400,6 @@
                     <input type="range" id="speedSlider" min="0.5" max="3" value="1" step="0.5">
                     <span id="speedValue">1x</span>
                 </div>
-                <button id="fpvExitButton">Keluar Mode FPV</button>
             </div>
         </div>
     </div>
@@ -512,7 +517,7 @@
                     this.reticle = reticleGltf.scene;
                     this.reticle.visible = false;
                     
-                    const objectGltf = await this.loadGLTF(loader, 'interior-fix.glb');
+                    const objectGltf = await this.loadGLTF(loader, 'interior-fix2.glb');
                     this.arObject = objectGltf.scene;
                     
                     this.arObject.traverse((child) => {
@@ -1096,18 +1101,10 @@
             }
             
             checkFPVCollisions(movementVector) {
-                const effectiveMovement = movementVector.clone();
-                if (!this.fpvObject || effectiveMovement.length() === 0) {
-                    return effectiveMovement;
+                const finalMovement = movementVector.clone();
+                if (!this.fpvObject || finalMovement.lengthSq() === 0) {
+                    return finalMovement;
                 }
-
-                // In FPV mode, the camera is effectively stationary at (0,0,0) in AR world space,
-                // and the environment (fpvObject) moves around it.
-                // So, collisions are checked between a conceptual "player capsule" at (0,0,0)
-                // and the fpvObject, considering its *future* position.
-
-                const playerHalfHeight = this.playerHeight / 2;
-                const playerWorldPos = new THREE.Vector3(0, 0, 0); // Camera is the player's reference point
 
                 const collisionObjects = [];
                 this.fpvObject.traverse(child => {
@@ -1115,52 +1112,43 @@
                         collisionObjects.push(child);
                     }
                 });
+                if (collisionObjects.length === 0) return finalMovement;
 
-                if (collisionObjects.length === 0) {
-                    return effectiveMovement;
-                }
+                // Iterate a few times to handle sliding in corners more gracefully
+                for (let i = 0; i < 5; i++) {
+                    const playerWorldPos = new THREE.Vector3(0, 0, 0); // Player (camera) is at the world origin
+                    const movementDirection = finalMovement.clone().normalize();
+                    
+                    if (movementDirection.lengthSq() === 0) break; // No movement left, no need to check
 
-                // Test rays from different points of the player's "capsule"
-                const rayOrigins = [
-                    new THREE.Vector3(0, 0, 0), // Center of player (camera position)
-                    new THREE.Vector3(0, playerHalfHeight, 0), // Top of player
-                    new THREE.Vector3(0, -playerHalfHeight, 0), // Bottom of player
-                    new THREE.Vector3(this.playerRadius * 0.8, 0, 0), // Slightly right
-                    new THREE.Vector3(-this.playerRadius * 0.8, 0, 0),// Slightly left
-                    new THREE.Vector3(0, 0, this.playerRadius * 0.8), // Slightly forward (adjusted)
-                    new THREE.Vector3(0, 0, -this.playerRadius * 0.8) // Slightly backward (adjusted)
-                ];
-
-                const movementDistance = effectiveMovement.length();
-                let blockedMovementScale = 1.0; // Scale factor for how much movement is allowed
-
-                for (const originOffset of rayOrigins) {
-                    const origin = playerWorldPos.clone().add(originOffset);
-                    this.collisionRaycaster.set(origin, effectiveMovement.clone().normalize());
+                    this.collisionRaycaster.set(playerWorldPos, movementDirection);
                     this.collisionRaycaster.near = 0;
-                    this.collisionRaycaster.far = movementDistance + this.playerRadius * 0.5; // Check slightly beyond player's "edge"
+                    // Check for collisions just ahead of the player's radius
+                    this.collisionRaycaster.far = this.playerRadius;
 
                     const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
 
                     if (intersects.length > 0) {
-                        const intersection = intersects[0];
-                        // If the intersection is very close or already inside, block movement completely
-                        if (intersection.distance < this.playerRadius * 0.5) {
-                            blockedMovementScale = 0;
-                            break;
-                        } else {
-                            // Calculate how much movement is possible before collision
-                            const remainingDistance = intersection.distance - (this.playerRadius * 0.5); // Distance to stop at the "surface"
-                            const currentScale = remainingDistance / movementDistance;
-                            if (currentScale < blockedMovementScale) {
-                                blockedMovementScale = Math.max(0, currentScale); // Ensure it's not negative
-                            }
+                        // A collision is happening within the player's radius.
+                        const hitNormal = intersects[0].face.normal;
+                        
+                        // Project the movement vector onto the hit normal.
+                        // This gives us the part of the movement that is directed INTO the wall.
+                        const projection = finalMovement.clone().projectOnVector(hitNormal);
+
+                        // Subtract that projection from the movement.
+                        // This removes the "into the wall" component, leaving only the "along the wall" (sliding) component.
+                        // We only do this if the projection is against the movement direction.
+                        if (projection.dot(hitNormal) < 0) {
+                            finalMovement.sub(projection);
                         }
+                    } else {
+                        // No collision was detected for this iteration, so we can exit the loop.
+                        break; 
                     }
                 }
-
-                effectiveMovement.multiplyScalar(blockedMovementScale);
-                return effectiveMovement;
+                
+                return finalMovement;
             }
 
             onScaleChange(value) {
