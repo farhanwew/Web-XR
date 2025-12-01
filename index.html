@@ -32,7 +32,6 @@
         /* AR DOM OVERLAY ROOT */
         #ar-root {
             display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            /* Ar-root should not block events to the scene by default, interactive children will override */
             pointer-events: none; 
             z-index: 100;
         }
@@ -221,7 +220,10 @@
                     { name: 'Tower House', url: 'tower_house_design.glb', icon: '🏠' },
                     { name: 'Kitchen', url: 'interior-fix2.glb', icon: '🍳' },
                     { name: 'Astronaut', url: 'Astronaut.glb', icon: '🧑‍🚀' },
-                    { name: '3 Bedroom House', url: '3_bedroom_house.glb', icon: '🏡' }
+                    { name: '3 Bedroom House', url: '3_bedroom_house.glb', icon: '🏡' },
+                    // NEW OBJECTS (Assuming conversion to GLB)
+                    { name: 'Apartment Floor Plan', url: 'apartment_floor_plan.glb', icon: '🏢' },
+                    { name: 'Room', url: 'Room.glb', icon: '🚪' }
                 ];
                 this.activeModelIndex = 0;
 
@@ -750,23 +752,33 @@
                 const targetScale = this.fpvOriginalScale.x * this.fpvTargetScale;
                 this.fpvObject.scale.set(targetScale, targetScale, targetScale);
 
-                // --- NEW: Adjust initial FPV position to avoid starting inside the object ---
-                // Move the object down so the viewer (at 0,0,0) is at 'playerHeight' above the object's base
-                this.fpvObject.position.y -= this.playerHeight; 
-                // Consider adding more complex adjustment if the object pivot is not at its base.
+                // Calculate bounding box AFTER scaling for accurate entry position
+                const tempBox = new THREE.Box3().setFromObject(this.fpvObject);
+                const objectCenter = tempBox.getCenter(new THREE.Vector3());
+                const objectBaseY = tempBox.min.y; // Lowest point of the object in its local coordinates
+
+                // Adjust fpvObject's position so viewer (at Y=0) is at playerHeight above its base,
+                // and horizontally centered.
+                // We want: WorldY (of base) = -playerHeight
+                // So, fpvObject.position.y + objectBaseY = -playerHeight
+                // => fpvObject.position.y = -playerHeight - objectBaseY
+                this.fpvObject.position.y = -this.playerHeight - objectBaseY;
+                this.fpvObject.position.x = -objectCenter.x;
+                this.fpvObject.position.z = -objectCenter.z;
+
 
                 this.reticle.visible = false;
                 this.highlightBox.visible = false;
                 
                 // UI Switching: Hiding Standard, Showing FPV
                 document.getElementById('standard-ui').style.display = 'none';
-                document.getElementById('standard-ui').style.pointerEvents = 'none'; // Ensure it's not interactive
+                document.getElementById('standard-ui').style.pointerEvents = 'none';
 
                 document.getElementById('fpv-ui').style.display = 'block';
-                document.getElementById('fpv-ui').style.pointerEvents = 'auto'; // Make FPV UI interactive
+                document.getElementById('fpv-ui').style.pointerEvents = 'auto';
 
                 const zone = document.getElementById('joystick-zone');
-                if (this.joystick) this.joystick.destroy(); // Destroy previous instance if any
+                if (this.joystick) this.joystick.destroy(); 
                 
                 this.joystick = nipplejs.create({
                     zone: zone,
@@ -800,7 +812,7 @@
                 }
 
                 this.moveVec = { x: 0, z: 0 };
-                this.verticalSpeed = 0; // Reset vertical speed too
+                this.verticalSpeed = 0;
                 this.fpvObject = null;
 
                 if (this.joystick) {
@@ -809,10 +821,10 @@
                 }
 
                 document.getElementById('standard-ui').style.display = 'flex';
-                document.getElementById('standard-ui').style.pointerEvents = 'auto'; // Make Standard UI interactive again
+                document.getElementById('standard-ui').style.pointerEvents = 'auto';
 
                 document.getElementById('fpv-ui').style.display = 'none';
-                document.getElementById('fpv-ui').style.pointerEvents = 'none'; // Ensure it's not interactive
+                document.getElementById('fpv-ui').style.pointerEvents = 'none';
                 
                 this.showToast("Keluar dari FPV");
             }
@@ -822,17 +834,29 @@
                 if (!this.fpvObject || finalMovement.lengthSq() === 0) return finalMovement;
 
                 const collisionObjects = [];
-                this.placedObjects.forEach(obj => {
-                    if (obj !== this.fpvObject) { 
+                // In FPV mode, we primarily collide with the FPV object itself (its internal walls)
+                // Other small placed objects are ignored for collision in this scaled view.
+                if (this.fpvMode) {
+                    this.fpvObject.traverse(child => {
+                        // Ensure only meshes contribute to collision
+                        if (child.isMesh) {
+                            collisionObjects.push(child);
+                        }
+                    });
+                } else {
+                    // In normal AR mode, collide with all placed objects except the one being manipulated
+                    this.placedObjects.forEach(obj => {
                         obj.traverse(child => {
-                            if (child.isMesh) collisionObjects.push(child);
+                            if (child.isMesh) {
+                                collisionObjects.push(child);
+                            }
                         });
-                    }
-                });
-                
+                    });
+                }
+
                 if (collisionObjects.length === 0) return finalMovement;
 
-                const playerPos = new THREE.Vector3(0, 0, 0);
+                const playerPos = new THREE.Vector3(0, 0, 0); // Player is at (0,0,0) in viewer space
                 let adjustedMovement = finalMovement.clone();
                 const invertedMovement = finalMovement.clone().negate();
 
@@ -859,14 +883,20 @@
                                 break;
                             }
                             if (firstHit.distance < horizontalMovementAttempt.length() + this.playerRadius) {
-                                const hitNormal = firstHit.face.normal;
-                                hitNormal.y = 0; hitNormal.normalize();
-                                const slideDirection = horizontalMovementAttempt.clone().projectOnPlane(hitNormal);
-                                if (slideDirection.lengthSq() > 0) {
-                                    const invertedSlide = slideDirection.negate();
-                                    adjustedMovement.x = invertedSlide.x;
-                                    adjustedMovement.z = invertedSlide.z;
-                                } else {
+                                // If a face is not available (e.g., from some loaders), skip normal check
+                                if (firstHit.face) {
+                                    const hitNormal = firstHit.face.normal;
+                                    hitNormal.y = 0; hitNormal.normalize();
+                                    const slideDirection = horizontalMovementAttempt.clone().projectOnPlane(hitNormal);
+                                    if (slideDirection.lengthSq() > 0) {
+                                        const invertedSlide = slideDirection.negate();
+                                        adjustedMovement.x = invertedSlide.x;
+                                        adjustedMovement.z = invertedSlide.z;
+                                    } else {
+                                        adjustedMovement.x = 0;
+                                        adjustedMovement.z = 0;
+                                    }
+                                } else { // Fallback if no face info, just stop movement
                                     adjustedMovement.x = 0;
                                     adjustedMovement.z = 0;
                                 }
