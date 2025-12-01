@@ -692,20 +692,39 @@
             }
 
             placeObject() {
-                const clone = this.arObject.clone();
-                const box = new THREE.Box3().setFromObject(clone);
+                if (!this.arObject) return;
+
+                // 1. Clone Model Asli
+                const rawModel = this.arObject.clone();
+                
+                // 2. Hitung Bounding Box untuk cari titik tengah visual
+                const box = new THREE.Box3().setFromObject(rawModel);
                 const center = new THREE.Vector3();
                 box.getCenter(center);
                 
-                clone.position.copy(this.reticle.position);
-                clone.position.sub(center);
-                clone.rotation.y = 0;
-                clone.scale.set(1, 1, 1);
-                clone.userData.objectId = this.objectIndex++;
+                // 3. Buat Wadah (Group) sebagai Pivot Point baru
+                const pivotGroup = new THREE.Group();
                 
-                this.scene.add(clone);
-                this.placedObjects.push(clone);
-                this.selectObject(clone);
+                // 4. Masukkan model ke wadah, dan geser supaya tengahnya pas di (0,0,0) wadah
+                // - center.x/z: Geser tengah ke 0
+                // - box.min.y: Geser dasar objek ke 0 (supaya napak lantai)
+                rawModel.position.x = -center.x;
+                rawModel.position.y = -box.min.y;
+                rawModel.position.z = -center.z;
+                
+                pivotGroup.add(rawModel);
+
+                // 5. Tempatkan Wadah di posisi Reticle
+                pivotGroup.position.copy(this.reticle.position);
+                pivotGroup.rotation.y = 0;
+                pivotGroup.scale.set(1, 1, 1);
+                
+                // ID untuk keperluan tracking/hapus
+                pivotGroup.userData.objectId = this.objectIndex++;
+                
+                this.scene.add(pivotGroup);
+                this.placedObjects.push(pivotGroup);
+                this.selectObject(pivotGroup);
             }
 
             selectObject(object) {
@@ -760,24 +779,13 @@
                 this.fpvObject.updateMatrixWorld(true); // Crucial: Update matrixWorld after scaling
 
                 // Calculate bounding box AFTER scaling for accurate entry position
-                const tempBox = new THREE.Box3().setFromObject(this.fpvObject);
-                const objectCenter = tempBox.getCenter(new THREE.Vector3());
-                const objectBaseY = tempBox.min.y; // Lowest point of the object relative to its pivot
+                // UPDATE: Objek sudah dinormalisasi (Dasar objek = 0,0,0 group).
+                // Kita cukup posisikan group supaya dasar lantai ada di -playerHeight relatif viewer.
                 
-                // Adjust fpvObject's position so viewer (at Y=0 in viewer space) is at playerHeight above its base,
-                // and horizontally centered.
-                // We want: The world Y coordinate of the object's base to be at Y = -playerHeight in viewer space.
-                // The object's world base Y is (fpvObject.position.y + objectBaseY)
-                // So, (fpvObject.position.y + objectBaseY) = -this.playerHeight
-                // => fpvObject.position.y = -this.playerHeight - objectBaseY
-                this.fpvObject.position.y = -this.playerHeight - objectBaseY;
+                this.fpvObject.position.set(0, -this.playerHeight, 0);
                 
-                // Adjust X and Z to center the viewer horizontally within the object
-                // The object's world center X/Z is (fpvObject.position.x + objectCenter.x_relative_to_pivot)
-                // We want this to be 0 for the viewer.
-                // So, fpvObject.position.x = -objectCenter.x
-                this.fpvObject.position.x = -objectCenter.x;
-                this.fpvObject.position.z = -objectCenter.z;
+                // Update matrix agar collision detection akurat
+                this.fpvObject.updateMatrixWorld(true);
 
                 this.reticle.visible = false;
                 this.highlightBox.visible = false;
