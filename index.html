@@ -32,6 +32,7 @@
         /* AR DOM OVERLAY ROOT */
         #ar-root {
             display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            /* Ar-root should not block events to the scene by default, interactive children will override */
             pointer-events: none; 
             z-index: 100;
         }
@@ -221,7 +222,8 @@
                     { name: 'Kitchen', url: 'interior-fix2.glb', icon: '🍳' },
                     { name: 'Astronaut', url: 'Astronaut.glb', icon: '🧑‍🚀' },
                     { name: '3 Bedroom House', url: '3_bedroom_house.glb', icon: '🏡' },
-                    // NEW OBJECTS (Assuming conversion to GLB)
+                    // NEW OBJECTS: Pastikan Anda telah mengonversi file .obj ini ke format .glb
+                    // dan letakkan di folder public/ agar dapat dimuat oleh GLTFLoader.
                     { name: 'Apartment Floor Plan', url: 'apartment_floor_plan.glb', icon: '🏢' },
                     { name: 'Room', url: 'Room.glb', icon: '🚪' }
                 ];
@@ -256,8 +258,9 @@
                 this.movementSpeedMultiplier = 1;
                 
                 // FPV Collision Detection Properties
-                this.playerHeight = 1.7;
-                this.playerRadius = 0.3;
+                // Increased playerRadius and playerHeight for more robust collision detection
+                this.playerHeight = 1.8; // Approx user height in meters
+                this.playerRadius = 0.5; // Approx user radius
                 this.collisionRaycaster = new THREE.Raycaster();
 
                 // FPV Control State
@@ -586,6 +589,9 @@
                     if (!this.fpvMode) {
                         this.handleHitTest(frame);
                     } else {
+                        // Crucial: Update matrixWorld for accurate collision checks against fpvObject
+                        // This ensures its bounding box and mesh positions are correct for raycasting.
+                        this.fpvObject.updateMatrixWorld(true); 
                         this.handleFPVMovement(pose);
                     }
                     
@@ -751,21 +757,27 @@
 
                 const targetScale = this.fpvOriginalScale.x * this.fpvTargetScale;
                 this.fpvObject.scale.set(targetScale, targetScale, targetScale);
+                this.fpvObject.updateMatrixWorld(true); // Crucial: Update matrixWorld after scaling
 
                 // Calculate bounding box AFTER scaling for accurate entry position
                 const tempBox = new THREE.Box3().setFromObject(this.fpvObject);
                 const objectCenter = tempBox.getCenter(new THREE.Vector3());
-                const objectBaseY = tempBox.min.y; // Lowest point of the object in its local coordinates
-
-                // Adjust fpvObject's position so viewer (at Y=0) is at playerHeight above its base,
+                const objectBaseY = tempBox.min.y; // Lowest point of the object relative to its pivot
+                
+                // Adjust fpvObject's position so viewer (at Y=0 in viewer space) is at playerHeight above its base,
                 // and horizontally centered.
-                // We want: WorldY (of base) = -playerHeight
-                // So, fpvObject.position.y + objectBaseY = -playerHeight
-                // => fpvObject.position.y = -playerHeight - objectBaseY
+                // We want: The world Y coordinate of the object's base to be at Y = -playerHeight in viewer space.
+                // The object's world base Y is (fpvObject.position.y + objectBaseY)
+                // So, (fpvObject.position.y + objectBaseY) = -this.playerHeight
+                // => fpvObject.position.y = -this.playerHeight - objectBaseY
                 this.fpvObject.position.y = -this.playerHeight - objectBaseY;
+                
+                // Adjust X and Z to center the viewer horizontally within the object
+                // The object's world center X/Z is (fpvObject.position.x + objectCenter.x_relative_to_pivot)
+                // We want this to be 0 for the viewer.
+                // So, fpvObject.position.x = -objectCenter.x
                 this.fpvObject.position.x = -objectCenter.x;
                 this.fpvObject.position.z = -objectCenter.z;
-
 
                 this.reticle.visible = false;
                 this.highlightBox.visible = false;
@@ -860,33 +872,38 @@
                 let adjustedMovement = finalMovement.clone();
                 const invertedMovement = finalMovement.clone().negate();
 
+                // --- Horizontal Collision ---
                 const horizontalMovementAttempt = new THREE.Vector3(invertedMovement.x, 0, invertedMovement.z);
                 if (horizontalMovementAttempt.lengthSq() > 0) {
                     const horizontalDirection = horizontalMovementAttempt.clone().normalize();
+                    // Casting multiple rays for better collision detection (front-left, front, front-right)
                     const rays = [
                         horizontalDirection,
-                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), Math.PI / 4),
-                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), -Math.PI / 4)
+                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), Math.PI / 4), // 45 degrees left
+                        horizontalDirection.clone().applyAxisAngle(new THREE.Vector3(0,1,0), -Math.PI / 4) // 45 degrees right
                     ];
 
                     let collisionDetected = false;
                     for (const ray of rays) {
                         this.collisionRaycaster.set(playerPos, ray);
                         this.collisionRaycaster.near = 0;
-                        this.collisionRaycaster.far = this.playerRadius + horizontalMovementAttempt.length();
+                        // Far should cover player radius + movement distance
+                        this.collisionRaycaster.far = this.playerRadius + horizontalMovementAttempt.length(); 
 
                         const intersects = this.collisionRaycaster.intersectObjects(collisionObjects, true);
                         if (intersects.length > 0) {
                             const firstHit = intersects[0];
-                            if (firstHit.distance < this.playerRadius) {
+                            if (firstHit.distance < this.playerRadius) { // Already intersecting or very close
                                 collisionDetected = true;
                                 break;
                             }
+                            // If an obstacle is detected in the path
                             if (firstHit.distance < horizontalMovementAttempt.length() + this.playerRadius) {
-                                // If a face is not available (e.g., from some loaders), skip normal check
-                                if (firstHit.face) {
+                                if (firstHit.face) { // Use normal for sliding if face data is available
                                     const hitNormal = firstHit.face.normal;
-                                    hitNormal.y = 0; hitNormal.normalize();
+                                    hitNormal.y = 0; // Ensure we only consider horizontal collision
+                                    hitNormal.normalize();
+
                                     const slideDirection = horizontalMovementAttempt.clone().projectOnPlane(hitNormal);
                                     if (slideDirection.lengthSq() > 0) {
                                         const invertedSlide = slideDirection.negate();
@@ -896,7 +913,8 @@
                                         adjustedMovement.x = 0;
                                         adjustedMovement.z = 0;
                                     }
-                                } else { // Fallback if no face info, just stop movement
+                                } else {
+                                    // Fallback: If no face data (e.g., from some loaders), just stop movement
                                     adjustedMovement.x = 0;
                                     adjustedMovement.z = 0;
                                 }
@@ -912,21 +930,28 @@
                     }
                 }
 
+                // --- Vertical Collision ---
                 const verticalMovementAttempt = invertedMovement.y;
                 if (Math.abs(verticalMovementAttempt) > 0) {
+                    // Rays cast from player's head and feet positions
                     const headPos = playerPos.clone().add(new THREE.Vector3(0, this.playerHeight / 2 - this.playerRadius / 2, 0));
                     const feetPos = playerPos.clone().add(new THREE.Vector3(0, -this.playerHeight / 2 + this.playerRadius / 2, 0));
                     
-                    if (verticalMovementAttempt > 0) {
-                        this.collisionRaycaster.set(headPos, new THREE.Vector3(0, 1, 0));
-                        this.collisionRaycaster.far = verticalMovementAttempt + this.playerRadius;
+                    // Check ceiling collision (if moving up)
+                    if (verticalMovementAttempt > 0) { 
+                        this.collisionRaycaster.set(headPos, new THREE.Vector3(0, 1, 0)); // Ray points upwards
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = verticalMovementAttempt + this.playerRadius; // Check up to player radius + movement
                         const ceilHits = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                        if (ceilHits.length > 0) finalMovement.y = 0;
-                    } else {
-                        this.collisionRaycaster.set(feetPos, new THREE.Vector3(0, -1, 0));
-                        this.collisionRaycaster.far = Math.abs(verticalMovementAttempt) + this.playerRadius;
+                        if (ceilHits.length > 0) finalMovement.y = 0; // Stop upward movement (of fpvObject)
+                    }
+                    // Check ground collision (if moving down)
+                    else if (verticalMovementAttempt < 0) {
+                        this.collisionRaycaster.set(feetPos, new THREE.Vector3(0, -1, 0)); // Ray points downwards
+                        this.collisionRaycaster.near = 0;
+                        this.collisionRaycaster.far = Math.abs(verticalMovementAttempt) + this.playerRadius; // Check down to player radius + movement
                         const groundHits = this.collisionRaycaster.intersectObjects(collisionObjects, true);
-                        if (groundHits.length > 0) finalMovement.y = 0;
+                        if (groundHits.length > 0) finalMovement.y = 0; // Stop downward movement (of fpvObject)
                     }
                 }
 
