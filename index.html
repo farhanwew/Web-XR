@@ -29,11 +29,16 @@
             pointer-events: auto; z-index: 200; width: 80%; max-width: 300px;
         }
 
-        /* MAIN AR OVERLAY CONTAINER */
-        #overlay-container {
+        /* AR DOM OVERLAY ROOT */
+        #ar-root {
             display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             pointer-events: none; z-index: 100;
-            flex-direction: column; justify-content: space-between;
+        }
+
+        /* STANDARD UI CONTAINER */
+        #standard-ui {
+            display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            flex-direction: column; justify-content: space-between; pointer-events: none;
         }
 
         .interactive { pointer-events: auto !important; }
@@ -131,50 +136,57 @@
         <button id="btn-start" class="interactive" disabled>Mulai AR</button>
     </div>
 
-    <div id="overlay-container">
-        <div id="hud-top">
-            <button id="btn-reset" class="icon-btn interactive">↺</button>
-            <button id="btn-exit" class="icon-btn red interactive">✕</button>
-        </div>
+    <!-- MAIN DOM OVERLAY ROOT -->
+    <div id="ar-root">
         
-        <div style="flex:1"></div>
-        
-        <div id="hud-bottom">
-            <div id="toast">Pilih model & ketuk lantai</div>
+        <!-- STANDARD UI LAYER -->
+        <div id="standard-ui">
+            <div id="hud-top">
+                <button id="btn-reset" class="icon-btn interactive">↺</button>
+                <button id="btn-exit" class="icon-btn red interactive">✕</button>
+            </div>
             
-            <div id="idle-menu">
-                <button id="btn-library" class="btn-main interactive">📂 Library 3D</button>
+            <div style="flex:1"></div>
+            
+            <div id="hud-bottom">
+                <div id="toast">Pilih model & ketuk lantai</div>
+                
+                <div id="idle-menu">
+                    <button id="btn-library" class="btn-main interactive">📂 Library 3D</button>
+                </div>
+
+                <div id="action-bar" class="interactive">
+                    <button id="btn-fpv" class="pill-btn btn-fpv">🚶 FPV</button>
+                    <div style="width:1px; height:20px; background:rgba(255,255,255,0.2); margin: 0 5px;"></div>
+                    <button id="btn-deselect" class="pill-btn">Batal</button>
+                    <button id="btn-delete" class="pill-btn btn-delete">Hapus</button>
+                </div>
             </div>
 
-            <div id="action-bar" class="interactive">
-                <button id="btn-fpv" class="pill-btn btn-fpv">🚶 FPV</button>
-                <div style="width:1px; height:20px; background:rgba(255,255,255,0.2); margin: 0 5px;"></div>
-                <button id="btn-deselect" class="pill-btn">Batal</button>
-                <button id="btn-delete" class="pill-btn btn-delete">Hapus</button>
+            <div id="library-drawer">
+                <div class="drawer-header">
+                    <h3>Pilih Model</h3>
+                    <button id="btn-close-lib" class="icon-btn" style="width:30px; height:30px; font-size:14px;">✕</button>
+                </div>
+                <div class="model-list" id="model-list-container"></div>
             </div>
         </div>
 
-        <div id="library-drawer">
-            <div class="drawer-header">
-                <h3>Pilih Model</h3>
-                <button id="btn-close-lib" class="icon-btn" style="width:30px; height:30px; font-size:14px;">✕</button>
+        <!-- FPV UI LAYER -->
+        <div id="fpv-ui">
+            <div style="position:absolute; top:20px; left:20px;">
+                <span style="background:var(--accent); color:white; padding:4px 10px; border-radius:10px; font-size:12px;">FPV MODE</span>
             </div>
-            <div class="model-list" id="model-list-container"></div>
+            <div style="position:absolute; top:20px; right:20px; pointer-events:auto;">
+                <button id="btn-exit-fpv" class="icon-btn interactive">✕</button>
+            </div>
+            <div id="joystick-zone"></div>
+            <div id="elevation-controls">
+                <button id="btn-up" class="icon-btn circle-big interactive">▲</button>
+                <button id="btn-down" class="icon-btn circle-big interactive">▼</button>
+            </div>
         </div>
-    </div>
 
-    <div id="fpv-ui">
-        <div style="position:absolute; top:20px; left:20px;">
-            <span style="background:var(--accent); color:white; padding:4px 10px; border-radius:10px; font-size:12px;">FPV MODE</span>
-        </div>
-        <div style="position:absolute; top:20px; right:20px; pointer-events:auto;">
-            <button id="btn-exit-fpv" class="icon-btn interactive">✕</button>
-        </div>
-        <div id="joystick-zone"></div>
-        <div id="elevation-controls">
-            <button id="btn-up" class="icon-btn circle-big interactive">▲</button>
-            <button id="btn-down" class="icon-btn circle-big interactive">▼</button>
-        </div>
     </div>
 
     <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
@@ -285,7 +297,7 @@
                     btn.ontouchstart = start; btn.ontouchend = end;
                     btn.onmousedown = start; btn.onmouseup = end;
                 };
-                setupHold('btn-up', 0.05); // Adjusted speed
+                setupHold('btn-up', 0.05);
                 setupHold('btn-down', -0.05);
 
                 // Generic UI Interaction tracking
@@ -333,7 +345,7 @@
             async selectModelFromLibrary(index) {
                 this.activeModelIndex = index;
                 const model = this.availableModels[index];
-                this.renderLibrary(); // Update active class
+                this.renderLibrary();
                 
                 this.showToast(`Memuat ${model.name}...`);
                 
@@ -368,7 +380,6 @@
                 this.highlightBox.visible = false;
             }
 
-            // --- Touch Handlers for Manipulation ---
             onTouchStart(e) {
                 if (!this.selectedObject || this.fpvMode || this.isUIInteraction) return;
                 this.isDragging = false; 
@@ -402,7 +413,6 @@
                 } else if (e.touches.length === 1) {
                     const dx = e.touches[0].pageX - this.touchStartX;
                     if (Math.abs(dx) > 10) {
-                        // e.preventDefault(); // Optional: prevent scrolling if needed
                         this.isDragging = true; 
                         const sensitivity = 0.01;
                         this.selectedObject.rotation.y = this.initialRotation + (dx * sensitivity);
@@ -428,9 +438,8 @@
                     const supported = await navigator.xr.isSessionSupported('immersive-ar');
                     if (supported) {
                         statusEl.innerHTML = 'WebXR Siap.<br>Memuat aset...';
-                        // Button enabled after models load
                     } else {
-                        statusEl.innerText = 'AR tidak didukung di perangkat ini';
+                        statusEl.innerText = 'AR tidak didukung';
                     }
                 } catch (error) {
                     statusEl.innerText = 'Error WebXR';
@@ -444,7 +453,6 @@
                 try {
                     const loader = new THREE.GLTFLoader();
 
-                    // Load Reticle
                     try {
                         const reticleGltf = await this.loadGLTF(loader, 'https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf');
                         this.reticle = reticleGltf.scene;
@@ -455,7 +463,6 @@
                     }
                     this.reticle.visible = false;
 
-                    // Load First Model
                     await this.loadSpecificModel(loader, this.availableModels[0].url);
                     
                     statusEl.innerText = 'Siap untuk AR';
@@ -472,7 +479,6 @@
                     const objectGltf = await this.loadGLTF(loader, modelUrl);
                     this.arObject = objectGltf.scene;
                     
-                    // Fix materials/shadows
                     this.arObject.traverse((child) => {
                         if (child.isMesh) {
                             child.castShadow = true;
@@ -497,7 +503,7 @@
             
             async startAR() {
                 document.getElementById('start-screen').style.display = 'none';
-                document.getElementById('overlay-container').style.display = 'flex';
+                document.getElementById('ar-root').style.display = 'block';
 
                 try {
                     this.canvas = document.createElement("canvas");
@@ -529,10 +535,11 @@
                     this.camera = new THREE.PerspectiveCamera();
                     this.camera.matrixAutoUpdate = false;
                     
+                    // IMPORTANT: Use #ar-root as the DOM Overlay Root
                     this.session = await navigator.xr.requestSession("immersive-ar", {
                         requiredFeatures: ['hit-test'],
                         optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.getElementById('overlay-container') }
+                        domOverlay: { root: document.getElementById('ar-root') }
                     });
                     
                     this.session.updateRenderState({ baseLayer: new XRWebGLLayer(this.session, this.gl) });
@@ -598,34 +605,26 @@
 
                 const desiredMovement = new THREE.Vector3();
                 
-                // Joystick Control
-                // Joystick Y > 0 means "Forward" for user. In inverted world logic, that means World moves Backward (-forward)
                 if (Math.abs(this.moveVec.z) > 0.1) {
                     const speedZ = this.moveVec.z * moveSpeed;
                     desiredMovement.sub(forward.clone().multiplyScalar(speedZ));
                 }
-                // Joystick X > 0 means "Right" for user. World moves Left (-right)
                 if (Math.abs(this.moveVec.x) > 0.1) {
                     const speedX = this.moveVec.x * moveSpeed;
                     desiredMovement.sub(right.clone().multiplyScalar(speedX));
                 }
 
-                // Elevation Control
                 if (this.verticalSpeed !== 0) {
-                    desiredMovement.y -= this.verticalSpeed; // Up button = world moves down
+                    desiredMovement.y -= this.verticalSpeed;
                 }
 
-                // COLLISION CHECK (Original Logic)
                 const adjustedMovement = this.checkFPVCollisions(desiredMovement);
-
                 this.fpvObject.position.add(adjustedMovement);
             }
             
             handleHitTest(frame) {
                 if (!this.hitTestSource || !this.reticle) return;
-
                 const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-
                 if (hitTestResults.length > 0) {
                     const hitPose = hitTestResults[0].getPose(this.referenceSpace);
                     if (hitPose) {
@@ -639,13 +638,11 @@
             }
             
             onSelect(event) {
-                // Interaction Filters
                 if (this.isUIInteraction || this.isDragging || this.fpvMode) return;
 
                 const frame = event.frame;
                 const inputSource = event.inputSource;
                 
-                // 1. Check for object selection via Raycast
                 if (inputSource && frame && inputSource.targetRaySpace) {
                     const pose = frame.getPose(inputSource.targetRaySpace, this.referenceSpace);
                     if (pose) {
@@ -670,11 +667,9 @@
                     }
                 }
                 
-                // 2. Place Object if Reticle is visible and no object selected
                 if (this.reticle.visible && this.arObject && !this.selectedObject) {
                     this.placeObject();
                 } else if (this.selectedObject) {
-                    // Tap background to deselect
                     this.deselectObject();
                 }
             }
@@ -686,7 +681,7 @@
                 box.getCenter(center);
                 
                 clone.position.copy(this.reticle.position);
-                clone.position.sub(center); // Center align
+                clone.position.sub(center);
                 clone.rotation.y = 0;
                 clone.scale.set(1, 1, 1);
                 clone.userData.objectId = this.objectIndex++;
@@ -699,7 +694,6 @@
             selectObject(object) {
                 this.selectedObject = object;
                 this.updateHighlightBox();
-                
                 document.getElementById('action-bar').style.display = 'flex';
                 document.getElementById('idle-menu').style.display = 'none';
                 this.showToast("1 Jari: Putar | 2 Jari: Cubit");
@@ -712,7 +706,6 @@
                 const center = new THREE.Vector3();
                 box.getSize(size);
                 box.getCenter(center);
-
                 this.highlightBox.scale.copy(size);
                 this.highlightBox.position.copy(center);
                 this.highlightBox.visible = true;
@@ -721,7 +714,6 @@
             deselectObject() {
                 this.selectedObject = null;
                 this.highlightBox.visible = false;
-                
                 document.getElementById('action-bar').style.display = 'none';
                 document.getElementById('idle-menu').style.display = 'flex';
                 this.showToast("Ketuk lantai untuk menempatkan");
@@ -752,11 +744,13 @@
                 this.reticle.visible = false;
                 this.highlightBox.visible = false;
                 
-                document.getElementById('overlay-container').style.display = 'none';
+                // UI Switching: Hiding Standard, Showing FPV
+                document.getElementById('standard-ui').style.display = 'none';
                 document.getElementById('fpv-ui').style.display = 'block';
 
-                // Initialize Joystick
                 const zone = document.getElementById('joystick-zone');
+                if (this.joystick) this.joystick.destroy();
+                
                 this.joystick = nipplejs.create({
                     zone: zone,
                     mode: 'static',
@@ -766,14 +760,16 @@
 
                 this.joystick.on('move', (evt, data) => {
                     if (data.vector) {
-                        this.moveVec.z = data.vector.y; // Forward/Back
-                        this.moveVec.x = data.vector.x; // Right/Left
+                        this.moveVec.z = data.vector.y;
+                        this.moveVec.x = data.vector.x;
                     }
                 });
 
                 this.joystick.on('end', () => {
                     this.moveVec = { x: 0, z: 0 };
                 });
+                
+                this.showToast("Mode FPV Aktif");
             }
 
             exitFPVMode() {
@@ -794,8 +790,10 @@
                     this.joystick = null;
                 }
 
-                document.getElementById('overlay-container').style.display = 'flex';
+                document.getElementById('standard-ui').style.display = 'flex';
                 document.getElementById('fpv-ui').style.display = 'none';
+                
+                this.showToast("Keluar dari FPV");
             }
             
             checkFPVCollisions(movementVector) {
@@ -804,7 +802,6 @@
 
                 const collisionObjects = [];
                 this.placedObjects.forEach(obj => {
-                    // Don't collide with the object we are inside (FPV Object)
                     if (obj !== this.fpvObject) { 
                         obj.traverse(child => {
                             if (child.isMesh) collisionObjects.push(child);
@@ -812,14 +809,12 @@
                     }
                 });
                 
-                // Note: If collisionObjects is empty (only 1 object in scene), no collision check needed.
                 if (collisionObjects.length === 0) return finalMovement;
 
-                const playerPos = new THREE.Vector3(0, 0, 0); // Camera origin
+                const playerPos = new THREE.Vector3(0, 0, 0);
                 let adjustedMovement = finalMovement.clone();
                 const invertedMovement = finalMovement.clone().negate();
 
-                // Horizontal Check
                 const horizontalMovementAttempt = new THREE.Vector3(invertedMovement.x, 0, invertedMovement.z);
                 if (horizontalMovementAttempt.lengthSq() > 0) {
                     const horizontalDirection = horizontalMovementAttempt.clone().normalize();
@@ -866,18 +861,17 @@
                     }
                 }
 
-                // Vertical Check
                 const verticalMovementAttempt = invertedMovement.y;
                 if (Math.abs(verticalMovementAttempt) > 0) {
                     const headPos = playerPos.clone().add(new THREE.Vector3(0, this.playerHeight / 2 - this.playerRadius / 2, 0));
                     const feetPos = playerPos.clone().add(new THREE.Vector3(0, -this.playerHeight / 2 + this.playerRadius / 2, 0));
                     
-                    if (verticalMovementAttempt > 0) { // Up
+                    if (verticalMovementAttempt > 0) {
                         this.collisionRaycaster.set(headPos, new THREE.Vector3(0, 1, 0));
                         this.collisionRaycaster.far = verticalMovementAttempt + this.playerRadius;
                         const ceilHits = this.collisionRaycaster.intersectObjects(collisionObjects, true);
                         if (ceilHits.length > 0) finalMovement.y = 0;
-                    } else { // Down
+                    } else {
                         this.collisionRaycaster.set(feetPos, new THREE.Vector3(0, -1, 0));
                         this.collisionRaycaster.far = Math.abs(verticalMovementAttempt) + this.playerRadius;
                         const groundHits = this.collisionRaycaster.intersectObjects(collisionObjects, true);
@@ -902,8 +896,7 @@
             
             onSessionEnded() {
                 this.cleanup();
-                document.getElementById('overlay-container').style.display = 'none';
-                document.getElementById('fpv-ui').style.display = 'none';
+                document.getElementById('ar-root').style.display = 'none';
                 document.getElementById('start-screen').style.display = 'block';
                 console.log('AR session ended');
             }
