@@ -32,13 +32,16 @@
         /* AR DOM OVERLAY ROOT */
         #ar-root {
             display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 100;
+            /* Ar-root should not block events to the scene by default, interactive children will override */
+            pointer-events: none; 
+            z-index: 100;
         }
 
         /* STANDARD UI CONTAINER */
         #standard-ui {
             display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            flex-direction: column; justify-content: space-between; pointer-events: none;
+            flex-direction: column; justify-content: space-between; 
+            pointer-events: none; /* Controlled by JS when active */
         }
 
         .interactive { pointer-events: auto !important; }
@@ -113,7 +116,12 @@
         .btn-fpv { background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.5); }
 
         /* FPV UI */
-        #fpv-ui { display: none; position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none; z-index: 150; }
+        #fpv-ui { 
+            display: none; 
+            position: absolute; top:0; left:0; width:100%; height:100%; 
+            pointer-events: none; /* Controlled by JS when active */
+            z-index: 150; 
+        }
         #joystick-zone { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; pointer-events: auto; }
         #elevation-controls { position: absolute; bottom: 50px; right: 30px; display: flex; flex-direction: column; gap: 15px; pointer-events: auto; }
         .circle-big { width: 60px; height: 60px; font-size: 24px; background: rgba(255,255,255,0.1); }
@@ -554,6 +562,7 @@
                     
                     this.session.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
                     
+                    document.getElementById('standard-ui').style.pointerEvents = 'auto'; // Make Standard UI interactive when AR starts
                     this.showToast('Pindai area lantai...');
                     
                 } catch (error) {
@@ -741,15 +750,23 @@
                 const targetScale = this.fpvOriginalScale.x * this.fpvTargetScale;
                 this.fpvObject.scale.set(targetScale, targetScale, targetScale);
 
+                // --- NEW: Adjust initial FPV position to avoid starting inside the object ---
+                // Move the object down so the viewer (at 0,0,0) is at 'playerHeight' above the object's base
+                this.fpvObject.position.y -= this.playerHeight; 
+                // Consider adding more complex adjustment if the object pivot is not at its base.
+
                 this.reticle.visible = false;
                 this.highlightBox.visible = false;
                 
                 // UI Switching: Hiding Standard, Showing FPV
                 document.getElementById('standard-ui').style.display = 'none';
+                document.getElementById('standard-ui').style.pointerEvents = 'none'; // Ensure it's not interactive
+
                 document.getElementById('fpv-ui').style.display = 'block';
+                document.getElementById('fpv-ui').style.pointerEvents = 'auto'; // Make FPV UI interactive
 
                 const zone = document.getElementById('joystick-zone');
-                if (this.joystick) this.joystick.destroy();
+                if (this.joystick) this.joystick.destroy(); // Destroy previous instance if any
                 
                 this.joystick = nipplejs.create({
                     zone: zone,
@@ -783,6 +800,7 @@
                 }
 
                 this.moveVec = { x: 0, z: 0 };
+                this.verticalSpeed = 0; // Reset vertical speed too
                 this.fpvObject = null;
 
                 if (this.joystick) {
@@ -791,7 +809,10 @@
                 }
 
                 document.getElementById('standard-ui').style.display = 'flex';
+                document.getElementById('standard-ui').style.pointerEvents = 'auto'; // Make Standard UI interactive again
+
                 document.getElementById('fpv-ui').style.display = 'none';
+                document.getElementById('fpv-ui').style.pointerEvents = 'none'; // Ensure it's not interactive
                 
                 this.showToast("Keluar dari FPV");
             }
