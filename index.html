@@ -225,7 +225,8 @@
                     // NEW OBJECTS: Pastikan Anda telah mengonversi file .obj ini ke format .glb
                     // dan letakkan di folder public/ agar dapat dimuat oleh GLTFLoader.
                     { name: 'Apartment Floor Plan', url: 'Apartment.glb', icon: '🏢' },
-                    { name: 'Room', url: 'Room.glb', icon: '🚪' }
+                    { name: 'Room', url: 'Room.glb', icon: '🚪' },
+                    { name : "Infinits Park", url: "Infinits Park.glb", icon: "🌳" }
                 ];
                 this.activeModelIndex = 0;
 
@@ -611,31 +612,65 @@
 
                 const moveSpeed = this.baseMovementSpeed * this.movementSpeedMultiplier;
                 
+                // 1. Ambil Matrix Kamera (Posisi & Rotasi HP saat ini)
                 const view = pose.views[0];
                 const cameraMatrix = new THREE.Matrix4().fromArray(view.transform.matrix);
                 
+                // 2. Ekstrak arah "Depan" dan "Kanan" relatif terhadap HP
+                // (0, 0, -1) adalah depan kamera standar
+                // (1, 0, 0) adalah kanan kamera standar
                 const forward = new THREE.Vector3(0, 0, -1).applyMatrix4(cameraMatrix);
                 const right = new THREE.Vector3(1, 0, 0).applyMatrix4(cameraMatrix);
                 
-                forward.y = 0; forward.normalize();
-                right.y = 0; right.normalize();
+                // PENTING: Kita ingin gerakan relatif terhadap rotasi kamera, 
+                // tapi TIDAK mau posisi kamera (translation) mempengaruhi vektor arah.
+                // Jadi kita kurangi dengan posisi kamera itu sendiri.
+                const cameraPosition = new THREE.Vector3().setFromMatrixPosition(cameraMatrix);
+                forward.sub(cameraPosition);
+                right.sub(cameraPosition);
+
+                // 3. FLATTEN ke Lantai (Abaikan Y)
+                // Agar saat nunduk/dongak, gerakan tetap mendatar di lantai
+                forward.y = 0;
+                right.y = 0;
+                
+                // Normalisasi (panjang vektor jadi 1) agar kecepatan konsisten
+                forward.normalize();
+                right.normalize();
 
                 const desiredMovement = new THREE.Vector3();
                 
-                if (Math.abs(this.moveVec.z) > 0.1) {
+                // 4. Mapping Joystick
+                // LOGIKA AR: Kita menggerakkan DUNIA, bukan KAMERA.
+                // Jika Joystick MAJU (Z positif di nipplejs kadang Y), kita ingin user merasa maju.
+                // User Maju = Objek Mundur (Mendekat ke user).
+                
+                // Joystick Y (Maju/Mundur)
+                if (this.moveVec.z !== 0) {
+                    // moveVec.z positif (atas) -> User Maju -> Objek Mundur (arah lawanan forward)
+                    // moveVec.z negatif (bawah) -> User Mundur -> Objek Maju (arah forward)
                     const speedZ = this.moveVec.z * moveSpeed;
-                    desiredMovement.sub(forward.clone().multiplyScalar(speedZ));
+                    // Kita tarik objek berlawanan arah pandangan
+                    desiredMovement.add(forward.multiplyScalar(-speedZ));
                 }
-                if (Math.abs(this.moveVec.x) > 0.1) {
+                
+                // Joystick X (Kiri/Kanan)
+                if (this.moveVec.x !== 0) {
                     const speedX = this.moveVec.x * moveSpeed;
-                    desiredMovement.sub(right.clone().multiplyScalar(speedX));
+                    // Joystick Kanan -> User Geser Kanan -> Objek Geser Kiri (arah lawanan right)
+                    desiredMovement.add(right.multiplyScalar(-speedX));
                 }
 
+                // 5. Kontrol Elevator (Naik/Turun Vertikal)
                 if (this.verticalSpeed !== 0) {
+                    // Tombol Naik -> User Naik -> Objek Turun
                     desiredMovement.y -= this.verticalSpeed;
                 }
 
+                // 6. Cek Tabrakan
                 const adjustedMovement = this.checkFPVCollisions(desiredMovement);
+                
+                // 7. Terapkan Gerakan
                 this.fpvObject.position.add(adjustedMovement);
             }
             
